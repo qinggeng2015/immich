@@ -10,6 +10,8 @@ import { UploadFieldName } from 'src/dtos/asset-media.dto';
 import { RouteKey } from 'src/enum';
 import { AuthRequest } from 'src/middleware/auth.guard';
 import { LoggingRepository } from 'src/repositories/logging.repository';
+import { MetadataRepository } from 'src/repositories/metadata.repository';
+import { StorageRepository } from 'src/repositories/storage.repository';
 import { AssetMediaService } from 'src/services/asset-media.service';
 import { ImmichFile, UploadFile, UploadFiles } from 'src/types';
 import { asRequest, mapToUploadFile } from 'src/utils/asset.util';
@@ -55,6 +57,8 @@ export class FileUploadInterceptor implements NestInterceptor {
     private reflect: Reflector,
     private assetService: AssetMediaService,
     private logger: LoggingRepository,
+    private metadataRepository: MetadataRepository,
+    private storageRepository: StorageRepository,
   ) {
     this.logger.setContext(FileUploadInterceptor.name);
 
@@ -133,7 +137,18 @@ export class FileUploadInterceptor implements NestInterceptor {
         hash.destroy();
         callback(error);
       } else {
-        callback(null, { ...info, checksum: hash.digest() });
+        if (this.isAssetUploadFile(file) && info?.path) {
+          this.processExifCreationTime(info.path, request, file)
+            .then(() => {
+              callback(null, { ...info, checksum: hash.digest() });
+            })
+            .catch((processError) => {
+              this.logger.warn(`EXIF processing failed but continuing with upload: ${processError.message}`);
+              callback(null, { ...info, checksum: hash.digest() });
+            });
+        } else {
+          callback(null, { ...info, checksum: hash.digest() });
+        }
       }
     });
   }
@@ -166,5 +181,44 @@ export class FileUploadInterceptor implements NestInterceptor {
         return null;
       }
     }
+  }
+
+  private async processExifCreationTime(filePath: string, request: AuthRequest, file: Express.Multer.File) {
+    try {
+      const exifTags = await this.metadataRepository.readTags(filePath);
+      
+      const hasCreationTime = exifTags.DateTimeOriginal || 
+                             exifTags.CreateDate || 
+                             exifTags.CreationDate;
+      
+      if (!hasCreationTime) {
+        const stats = await this.storageRepository.stat(filePath);
+        const creationTime = stats.birthtime || stats.mtime;
+        
+        // Convert Date to EXIF datetime format (YYYY:MM:DD HH:MM:SS)
+        const exifDateTime = this.formatDateForExif(creationTime);
+        
+        await this.metadataRepository.writeTags(filePath, {
+          DateTimeOriginal: exifDateTime,
+          CreateDate: exifDateTime,
+        });
+        
+        this.logger.log(`Added creation time to EXIF for file: ${filePath}`);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Failed to process EXIF creation time for ${filePath}: ${errorMessage}`);
+    }
+  }
+
+  private formatDateForExif(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    
+    return `${year}:${month}:${day} ${hours}:${minutes}:${seconds}`;
   }
 }
