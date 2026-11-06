@@ -90,6 +90,14 @@ describe(AudioAnalysisRepository.name, () => {
       transcriptChecksum: asset.checksum,
       transcriptSourceModifiedAt: asset.fileModifiedAt,
       transcriptStatus: AudioAnalysisStatus.Ready,
+      transcriptRevision: expect.stringMatching(/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/),
+      summary: null,
+      summaryStatus: AudioAnalysisStatus.Unprocessed,
+      summaryChecksum: null,
+      summarySourceModifiedAt: null,
+      summaryTranscriptRevision: null,
+      summaryConfigHash: null,
+      summaryJobId: null,
     });
   });
 

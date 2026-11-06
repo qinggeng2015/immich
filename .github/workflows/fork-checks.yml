@@ -88,11 +88,12 @@ jobs:
           mise //:sdk:install
           mise //:sdk:build
           mise //web:install
-      - name: Check format, lint and types
-        run: |
-          mise //web:format
-          mise //web:lint
-          mise //web:check
+      - name: Check web formatting
+        run: mise //web:format
+      - name: Lint web sources
+        run: mise //web:lint
+      - name: Check web types
+        run: mise //web:check
       - name: Run all web unit tests
         run: mise //web:test --run --maxWorkers=2
       - name: Install Chromium dependencies
