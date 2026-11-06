@@ -111,6 +111,7 @@ const ServerStatsResponseSchema = z
 
 const ServerMediaTypesResponseSchema = z
   .object({
+    audio: z.array(z.string()).optional().describe('Supported audio filename extensions'),
     video: z.array(z.string()).describe('Supported video MIME types'),
     image: z.array(z.string()).describe('Supported image MIME types'),
     sidecar: z.array(z.string()).describe('Supported sidecar MIME types'),
@@ -137,6 +138,10 @@ const ServerConfigSchema = z
 
 const ServerFeaturesSchema = z
   .object({
+    audio: z.boolean().optional().describe('Whether audio assets are supported'),
+    audioWaveform: z.boolean().optional().describe('Whether audio waveform retrieval and generation are supported'),
+    speechToText: z.boolean().optional().describe('Whether audio transcription retrieval and generation are supported'),
+    audioSummary: z.boolean().optional().describe('Whether audio summary retrieval and generation are supported'),
     smartSearch: z.boolean().describe('Whether smart search is enabled'),
     duplicateDetection: z.boolean().describe('Whether duplicate detection is enabled'),
     configFile: z.boolean().describe('Whether config file is available'),

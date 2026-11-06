@@ -51,6 +51,7 @@ abstract class SearchFilter with _$SearchFilter {
     String? filename,
     String? description,
     String? ocr,
+    String? transcript,
     String? language,
     String? assetId,
     Set<Tag>? tags,
@@ -69,6 +70,7 @@ abstract class SearchFilter with _$SearchFilter {
         (description == null || (description!.isEmpty)) &&
         (assetId == null || (assetId!.isEmpty)) &&
         (ocr == null || (ocr!.isEmpty)) &&
+        (transcript == null || (transcript!.isEmpty)) &&
         (tags?.isEmpty ?? true) &&
         people.isEmpty &&
         location.country == null &&

@@ -49,6 +49,7 @@ const SHARED_LINK_ROUTES = new Set([
   'GET albums/:id',
   'GET albums/:id/map-markers',
   'GET assets/:id',
+  'GET assets/:id/audio/waveform',
   'GET assets/:id/original',
   'GET assets/:id/thumbnail',
   'GET assets/:id/video/playback',

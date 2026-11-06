@@ -101,6 +101,7 @@ enum ActionButtonType {
             context.isArchived,
       ActionButtonType.download =>
         !context.isInLockedView && //
+            !context.asset.isAudio &&
             context.asset.hasRemote && //
             !context.asset.hasLocal,
       ActionButtonType.restoreTrash =>
@@ -144,9 +145,11 @@ enum ActionButtonType {
             context.currentAlbum!.isShared,
       ActionButtonType.similarPhotos =>
         !context.isInLockedView && //
+            !context.asset.isAudio &&
             context.asset is RemoteAsset,
       ActionButtonType.setProfilePicture =>
         !context.isInLockedView && //
+            !context.asset.isAudio &&
             context.asset is RemoteAsset && //
             context.isOwner,
       ActionButtonType.openInfo => true,
@@ -158,7 +161,7 @@ enum ActionButtonType {
             context.timelineOrigin != TimelineOrigin.archive &&
             context.timelineOrigin != TimelineOrigin.localAlbum &&
             context.isOwner,
-      ActionButtonType.cast => context.isCasting || context.asset.hasRemote,
+      ActionButtonType.cast => context.isCasting || (!context.asset.isAudio && context.asset.hasRemote),
       ActionButtonType.slideshow => true,
     };
   }

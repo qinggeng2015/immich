@@ -15,7 +15,7 @@ import { ImagePathOptions, StorageCore, ThumbnailPathEntity } from 'src/cores/st
 import { AssetFile } from 'src/database.js';
 import { OnEvent, OnJob } from 'src/decorators.js';
 import { ConfigFFmpegDto, SystemConfig } from 'src/dtos/config.dto.js';
-import { AssetEditAction, CropParameters } from 'src/dtos/editing.dto.js';
+import { AssetEditAction, AssetEditActionItem, CropParameters } from 'src/dtos/editing.dto.js';
 import {
   AssetFileType,
   AssetType,
@@ -39,6 +39,7 @@ import { AssetJobRepository } from 'src/repositories/asset-job.repository.js';
 import { BoundingBox } from 'src/repositories/machine-learning.repository.js';
 import { BaseService } from 'src/services/base.service.js';
 import { getAssetFile, getDimensions } from 'src/utils/asset.util.js';
+import { getAudioTranscodeCommand } from 'src/utils/audio.js';
 import { tokenizeForSearch } from 'src/utils/database.js';
 import { checkFaceVisibility, checkOcrVisibility } from 'src/utils/editor.js';
 import { BaseConfig, ThumbnailConfig } from 'src/utils/media.js';
@@ -56,6 +57,10 @@ interface UpsertFileOptions {
 }
 
 type ThumbnailAsset = NonNullable<Awaited<ReturnType<AssetJobRepository['getForGenerateThumbnailJob']>>>;
+
+const audioCover = Buffer.from(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><rect width="512" height="512" rx="32" fill="#202838"/><circle cx="256" cy="256" r="112" fill="#34445c"/><path d="M226 194v124l96-62z" fill="#ffffff"/></svg>',
+);
 
 @Injectable()
 export class MediaService extends BaseService {
@@ -210,6 +215,8 @@ export class MediaService extends BaseService {
     } else if (asset.type === AssetType.Image) {
       this.logger.verbose(`Thumbnail generation for image ${id} ${asset.originalPath}`);
       generated = await this.generateImageThumbnails(asset, config);
+    } else if (asset.type === AssetType.Audio) {
+      generated = await this.generateAudioThumbnails(asset, config);
     } else {
       this.logger.warn(`Skipping thumbnail generation for asset ${id}: ${asset.type} is not an image or video`);
       return JobStatus.Skipped;
@@ -497,6 +504,35 @@ export class MediaService extends BaseService {
     };
   }
 
+  private async generateAudioThumbnails(asset: ThumbnailAsset, { image }: SystemConfig) {
+    const options = {
+      colorspace: Colorspace.Srgb,
+      processInvalidImages: false,
+      edits: [] as AssetEditActionItem[],
+      decodingTier: THUMBNAIL_DECODING_TIER,
+    } as const;
+    const decoded = await this.mediaRepository.decodeImage(audioCover, options);
+    const files: UpsertFileOptions[] = [];
+    for (const [fileType, settings] of [
+      [AssetFileType.Preview, image.preview],
+      [AssetFileType.Thumbnail, image.thumbnail],
+    ] as const) {
+      const file = this.getImageFile(asset, {
+        fileType,
+        format: settings.format,
+        isEdited: false,
+        isProgressive: !!settings.progressive && settings.format === ImageFormat.Jpeg,
+        isTransparent: false,
+      });
+      this.storageCore.ensureFolders(file.path);
+      await this.mediaRepository.generateThumbnail(decoded, { ...settings, ...options }, file.path);
+      files.push(file);
+    }
+
+    const thumbhash = await this.mediaRepository.generateThumbhash(decoded, options);
+    return { files, thumbhash, fullsizeDimensions: { width: 512, height: 512 } };
+  }
+
   private async generateVideoThumbnails(asset: ThumbnailAsset, { ffmpeg, image }: SystemConfig) {
     const previewFile = this.getImageFile(asset, {
       fileType: AssetFileType.Preview,
@@ -568,6 +604,22 @@ export class MediaService extends BaseService {
     const input = asset.originalPath;
     const output = StorageCore.getEncodedVideoPath(asset);
     this.storageCore.ensureFolders(output);
+
+    if (asset.type === AssetType.Audio) {
+      if (!asset.audioStream) {
+        this.logger.warn(`Skipped transcoding for audio ${asset.id}: missing audio metadata`);
+        return JobStatus.Failed;
+      }
+
+      await this.mediaRepository.transcode(input, output, getAudioTranscodeCommand(asset.audioStream.index));
+      await this.assetRepository.upsertFile({
+        assetId: asset.id,
+        type: AssetFileType.EncodedVideo,
+        path: output,
+        isEdited: false,
+      });
+      return JobStatus.Success;
+    }
 
     const { videoStream, format } = asset;
     const audioStream = asset.audioStream ?? undefined;

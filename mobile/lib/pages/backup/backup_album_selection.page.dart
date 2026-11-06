@@ -6,12 +6,15 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/album/local_album.model.dart';
 import 'package:immich_mobile/domain/services/sync_linked_album.service.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
+import 'package:immich_mobile/extensions/platform_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/infrastructure/repositories/settings.repository.dart';
+import 'package:immich_mobile/presentation/widgets/backup/backup_directory_tile.widget.dart';
+import 'package:immich_mobile/presentation/widgets/backup/choose_backup_directory.widget.dart';
+import 'package:immich_mobile/providers/auth.provider.dart';
 import 'package:immich_mobile/providers/background_sync.provider.dart';
 import 'package:immich_mobile/providers/backup/backup.provider.dart';
 import 'package:immich_mobile/providers/backup/backup_album.provider.dart';
-import 'package:immich_mobile/providers/infrastructure/platform.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/settings.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:immich_mobile/widgets/backup/album_info_list_tile.dart';
@@ -34,6 +37,7 @@ class BackupAlbumSelectionPage extends ConsumerStatefulWidget {
 class _BackupAlbumSelectionPageState extends ConsumerState<BackupAlbumSelectionPage> {
   String _searchQuery = '';
   bool _isSearchMode = false;
+  bool _directoriesChanged = false;
   int _initialTotalAssetCount = 0;
   late ValueNotifier<bool> _enableSyncUploadAlbum;
   late TextEditingController _searchController;
@@ -100,6 +104,7 @@ class _BackupAlbumSelectionPageState extends ConsumerState<BackupAlbumSelectionP
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
         if (!didPop) {
+          final container = ProviderScope.containerOf(context, listen: false);
           await _handlePagePopped();
           if (!mounted) {
             return;
@@ -120,22 +125,41 @@ class _BackupAlbumSelectionPageState extends ConsumerState<BackupAlbumSelectionP
           final totalChanged = currentTotalAssetCount != _initialTotalAssetCount;
           final backupNotifier = ref.read(backupProvider.notifier);
           final backgroundSync = ref.read(backgroundSyncProvider);
-          final nativeSync = ref.read(nativeSyncApiProvider);
-          if (totalChanged) {
-            // Waits for hashing to be cancelled before starting a new one
-            unawaited(nativeSync.cancelHashing().whenComplete(() => backgroundSync.hashAssets()));
+          if (totalChanged || _directoriesChanged) {
             if (isBackupEnabled) {
               backupNotifier.stopForegroundBackup(reason: "backup albums updated");
-              unawaited(
-                backgroundSync.syncRemote().then((success) {
-                  if (success) {
-                    return backupNotifier.startForegroundBackup(user.id);
-                  } else {
+            }
+
+            bool shouldResumeBackup() {
+              if (!backupNotifier.mounted || !SettingsRepository.instance.appConfig.backup.enabled) {
+                return false;
+              }
+              final auth = container.read(authProvider);
+              final isForeground = switch (WidgetsBinding.instance.lifecycleState) {
+                AppLifecycleState.resumed || AppLifecycleState.inactive => true,
+                _ => false,
+              };
+              return auth.isAuthenticated && auth.userId == user.id && isForeground;
+            }
+
+            Future<void> prepareBackup() async {
+              try {
+                final synced = await backgroundSync.prepareBackup(syncServer: isBackupEnabled);
+                if (!synced) {
+                  if (isBackupEnabled) {
                     Logger('BackupAlbumSelectionPage').warning('Background sync failed, not starting backup');
                   }
-                }),
-              );
+                  return;
+                }
+                if (shouldResumeBackup()) {
+                  await backupNotifier.startForegroundBackup(user.id);
+                }
+              } catch (error, stackTrace) {
+                Logger('BackupAlbumSelectionPage').warning('Failed to prepare backup', error, stackTrace);
+              }
             }
+
+            unawaited(prepareBackup());
           }
 
           if (!context.mounted) {
@@ -259,6 +283,15 @@ class _BackupAlbumSelectionPageState extends ConsumerState<BackupAlbumSelectionP
                         ),
                       ),
 
+                      if (CurrentPlatform.isAndroid)
+                        ChooseBackupDirectory(
+                          onSelected: () => setState(() {
+                            _directoriesChanged = true;
+                            _isSearchMode = false;
+                            _searchQuery = '';
+                            _searchController.clear();
+                          }),
+                        ),
                       _SelectAllButton(filteredAlbums: filteredAlbums, selectedBackupAlbums: selectedBackupAlbums),
                     ],
                   ),
@@ -277,9 +310,15 @@ class _BackupAlbumSelectionPageState extends ConsumerState<BackupAlbumSelectionP
                   SliverLayoutBuilder(
                     builder: (context, constraints) {
                       if (constraints.crossAxisExtent > 600) {
-                        return _AlbumSelectionGrid(filteredAlbums: filteredAlbums);
+                        return _AlbumSelectionGrid(
+                          filteredAlbums: filteredAlbums,
+                          onDirectoryChanged: () => _directoriesChanged = true,
+                        );
                       } else {
-                        return _AlbumSelectionList(filteredAlbums: filteredAlbums);
+                        return _AlbumSelectionList(
+                          filteredAlbums: filteredAlbums,
+                          onDirectoryChanged: () => _directoriesChanged = true,
+                        );
                       }
                     },
                   ),
@@ -319,8 +358,9 @@ class _BackupAlbumSelectionPageState extends ConsumerState<BackupAlbumSelectionP
 
 class _AlbumSelectionList extends StatelessWidget {
   final List<LocalAlbum> filteredAlbums;
+  final VoidCallback onDirectoryChanged;
 
-  const _AlbumSelectionList({required this.filteredAlbums});
+  const _AlbumSelectionList({required this.filteredAlbums, required this.onDirectoryChanged});
 
   @override
   Widget build(BuildContext context) {
@@ -328,7 +368,10 @@ class _AlbumSelectionList extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 12.0),
       sliver: SliverList(
         delegate: SliverChildBuilderDelegate((context, index) {
-          return AlbumInfoListTile(album: filteredAlbums[index]);
+          final album = filteredAlbums[index];
+          return CurrentPlatform.isAndroid && album.id.startsWith('saf-folder:')
+              ? BackupDirectoryTile(key: ValueKey(album.id), album: album, onChanged: onDirectoryChanged)
+              : AlbumInfoListTile(album: album);
         }, childCount: filteredAlbums.length),
       ),
     );
@@ -337,8 +380,9 @@ class _AlbumSelectionList extends StatelessWidget {
 
 class _AlbumSelectionGrid extends StatelessWidget {
   final List<LocalAlbum> filteredAlbums;
+  final VoidCallback onDirectoryChanged;
 
-  const _AlbumSelectionGrid({required this.filteredAlbums});
+  const _AlbumSelectionGrid({required this.filteredAlbums, required this.onDirectoryChanged});
 
   @override
   Widget build(BuildContext context) {
@@ -352,7 +396,10 @@ class _AlbumSelectionGrid extends StatelessWidget {
         ),
         itemCount: filteredAlbums.length,
         itemBuilder: (context, index) {
-          return AlbumInfoListTile(album: filteredAlbums[index]);
+          final album = filteredAlbums[index];
+          return CurrentPlatform.isAndroid && album.id.startsWith('saf-folder:')
+              ? BackupDirectoryTile(key: ValueKey(album.id), album: album, onChanged: onDirectoryChanged)
+              : AlbumInfoListTile(album: album);
         },
       ),
     );

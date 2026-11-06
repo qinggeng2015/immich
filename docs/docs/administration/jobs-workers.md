@@ -69,6 +69,11 @@ graph TD
     D --> F[Face Detection]
     D --> G[OCR]
     D --> H[Video Transcoding]
+    D --> K[Audio Waveform Generation]
+    D --> L[Speech to Text]
+    L --> M[Audio Summary]
     E --> I[Duplicate Detection]
     F --> J[Facial Recognition]
 ```
+
+[Audio waveform generation, speech transcription, and summaries](/features/audio-analysis) run only for audio assets. Speech transcription also requires the machine learning service and the automatic transcription setting to be enabled. When audio summaries and automatic summarization are enabled, successful transcription queues a summary request to the configured text model provider. Summaries are disabled by default. Existing audio can be processed from the dedicated queues on the Jobs page.

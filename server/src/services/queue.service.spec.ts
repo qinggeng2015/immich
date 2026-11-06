@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { SystemConfig, defaults } from 'src/dtos/config.dto.js';
-import { ImmichWorker, JobName, QueueCommand, QueueName } from 'src/enum.js';
+import { ImmichWorker, JobName, QueueCleanType, QueueCommand, QueueName } from 'src/enum.js';
 import { QueueService } from 'src/services/queue.service.js';
 import { factory } from 'test/small.factory.js';
 import { ServiceMocks, newTestService } from 'test/utils.js';
@@ -23,11 +23,13 @@ describe(QueueService.name, () => {
     it('should update concurrency', () => {
       sut.onConfigUpdate({ newConfig: defaults, oldConfig: {} as SystemConfig });
 
-      expect(mocks.job.setConcurrency).toHaveBeenCalledTimes(19);
-      expect(mocks.job.setConcurrency).toHaveBeenNthCalledWith(5, QueueName.FacialRecognition, 1);
-      expect(mocks.job.setConcurrency).toHaveBeenNthCalledWith(7, QueueName.DuplicateDetection, 1);
-      expect(mocks.job.setConcurrency).toHaveBeenNthCalledWith(8, QueueName.BackgroundTask, 5);
-      expect(mocks.job.setConcurrency).toHaveBeenNthCalledWith(9, QueueName.StorageTemplateMigration, 1);
+      expect(mocks.job.setConcurrency).toHaveBeenCalledTimes(Object.values(QueueName).length);
+      expect(mocks.job.setConcurrency).toHaveBeenCalledWith(QueueName.FacialRecognition, 1);
+      expect(mocks.job.setConcurrency).toHaveBeenCalledWith(QueueName.DuplicateDetection, 1);
+      expect(mocks.job.setConcurrency).toHaveBeenCalledWith(QueueName.BackgroundTask, 5);
+      expect(mocks.job.setConcurrency).toHaveBeenCalledWith(QueueName.StorageTemplateMigration, 1);
+      expect(mocks.job.setConcurrency).toHaveBeenCalledWith(QueueName.AudioWaveform, 1);
+      expect(mocks.job.setConcurrency).toHaveBeenCalledWith(QueueName.SpeechToText, 1);
     });
   });
 
@@ -53,14 +55,14 @@ describe(QueueService.name, () => {
   });
 
   describe('getAllJobStatus', () => {
-    it('should get all job statuses', async () => {
+    it.each([undefined, true])('should retain the legacy queue keys with analysis support %s', async (supported) => {
       const stats = factory.queueStatistics({ active: 1 });
       const expected = { jobCounts: stats, queueStatus: { isActive: true, isPaused: true } };
 
       mocks.job.getJobCounts.mockResolvedValue(stats);
       mocks.job.isPaused.mockResolvedValue(true);
 
-      await expect(sut.getAllLegacy(factory.auth())).resolves.toEqual({
+      await expect(sut.getAllLegacy({ ...factory.auth(), audioAnalysisSupported: supported })).resolves.toEqual({
         [QueueName.BackgroundTask]: expected,
         [QueueName.DuplicateDetection]: expected,
         [QueueName.SmartSearch]: expected,
@@ -84,7 +86,106 @@ describe(QueueService.name, () => {
     });
   });
 
+  describe('getAll', () => {
+    it('hides the summary queue from existing audio-analysis clients', async () => {
+      mocks.job.getJobCounts.mockResolvedValue(factory.queueStatistics());
+      mocks.job.isPaused.mockResolvedValue(false);
+      const queues = await sut.getAll({ ...factory.auth(), audioAnalysisSupported: true });
+      expect(queues.map(({ name }) => name)).not.toContain(QueueName.AudioSummary);
+      expect(mocks.job.getJobCounts).not.toHaveBeenCalledWith(QueueName.AudioSummary);
+    });
+    it.each([undefined, true])(
+      'should hide new queue names from clients with only audio support %s',
+      async (supported) => {
+        mocks.job.getJobCounts.mockResolvedValue(factory.queueStatistics());
+        mocks.job.isPaused.mockResolvedValue(false);
+
+        const queues = await sut.getAll({ ...factory.auth(), audioSupported: supported });
+        const names = queues.map(({ name }) => name);
+
+        expect(names).not.toContain(QueueName.AudioWaveform);
+        expect(names).not.toContain(QueueName.SpeechToText);
+        expect(names).toHaveLength(Object.values(QueueName).length - 3);
+        expect(mocks.job.getJobCounts).not.toHaveBeenCalledWith(QueueName.AudioWaveform);
+        expect(mocks.job.getJobCounts).not.toHaveBeenCalledWith(QueueName.SpeechToText);
+      },
+    );
+
+    it('should include audio analysis queues for an opted-in client', async () => {
+      mocks.job.getJobCounts.mockResolvedValue(factory.queueStatistics());
+      mocks.job.isPaused.mockResolvedValue(false);
+
+      const queues = await sut.getAll({ ...factory.auth(), audioAnalysisSupported: true, audioSummarySupported: true });
+
+      expect(queues.map(({ name }) => name)).toEqual(Object.values(QueueName));
+    });
+  });
+
+  describe('emptyQueue', () => {
+    it.each([
+      { queue: QueueName.AudioWaveform, kind: 'waveform' },
+      { queue: QueueName.SpeechToText, kind: 'transcript' },
+      { queue: QueueName.AudioSummary, kind: 'summary' },
+    ])('should reset pending $kind statuses after emptying the queue', async ({ queue, kind }) => {
+      mocks.audioAnalysis.resetPending.mockResolvedValue([]);
+
+      await sut.emptyQueue(factory.auth(), queue, { failed: true });
+
+      expect(mocks.job.empty).toHaveBeenCalledExactlyOnceWith(queue);
+      expect(mocks.audioAnalysis.resetPending).toHaveBeenCalledExactlyOnceWith(kind);
+      expect(mocks.job.clear).toHaveBeenCalledExactlyOnceWith(queue, QueueCleanType.Failed);
+      expect(mocks.job.empty.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.audioAnalysis.resetPending.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('should leave audio statuses unchanged when emptying an ordinary queue', async () => {
+      await sut.emptyQueue(factory.auth(), QueueName.MetadataExtraction, {});
+
+      expect(mocks.job.empty).toHaveBeenCalledExactlyOnceWith(QueueName.MetadataExtraction);
+      expect(mocks.audioAnalysis.resetPending).not.toHaveBeenCalled();
+      expect(mocks.job.clear).not.toHaveBeenCalled();
+    });
+
+    it('should retain pending statuses if emptying the queue fails', async () => {
+      const error = new Error('Queue unavailable');
+      mocks.job.empty.mockRejectedValue(error);
+
+      await expect(sut.emptyQueue(factory.auth(), QueueName.AudioWaveform, {})).rejects.toBe(error);
+
+      expect(mocks.audioAnalysis.resetPending).not.toHaveBeenCalled();
+    });
+  });
+
   describe('handleCommand', () => {
+    it.each([
+      { queue: QueueName.AudioWaveform, kind: 'waveform' },
+      { queue: QueueName.SpeechToText, kind: 'transcript' },
+      { queue: QueueName.AudioSummary, kind: 'summary' },
+    ])('should reset pending $kind statuses when emptying the legacy queue', async ({ queue, kind }) => {
+      mocks.job.getJobCounts.mockResolvedValue(factory.queueStatistics());
+      mocks.audioAnalysis.resetPending.mockResolvedValue([]);
+
+      await sut.runCommandLegacy(queue, { command: QueueCommand.Empty });
+
+      expect(mocks.job.empty).toHaveBeenCalledExactlyOnceWith(queue);
+      expect(mocks.audioAnalysis.resetPending).toHaveBeenCalledExactlyOnceWith(kind);
+    });
+
+    it.each([
+      { queue: QueueName.AudioWaveform, job: JobName.AssetGenerateWaveformQueueAll, force: false },
+      { queue: QueueName.AudioWaveform, job: JobName.AssetGenerateWaveformQueueAll, force: true },
+      { queue: QueueName.SpeechToText, job: JobName.AssetTranscribeQueueAll, force: false },
+      { queue: QueueName.SpeechToText, job: JobName.AssetTranscribeQueueAll, force: true },
+    ])('should start $queue with force=$force', async ({ queue, job, force }) => {
+      mocks.job.isActive.mockResolvedValue(false);
+      mocks.job.getJobCounts.mockResolvedValue(factory.queueStatistics());
+
+      await sut.runCommandLegacy(queue, { command: QueueCommand.Start, force });
+
+      expect(mocks.job.queue).toHaveBeenCalledWith({ name: job, data: { force } });
+    });
+
     it('should handle a pause command', async () => {
       mocks.job.getJobCounts.mockResolvedValue(factory.queueStatistics());
 
@@ -107,6 +208,7 @@ describe(QueueService.name, () => {
       await sut.runCommandLegacy(QueueName.MetadataExtraction, { command: QueueCommand.Empty, force: false });
 
       expect(mocks.job.empty).toHaveBeenCalledWith(QueueName.MetadataExtraction);
+      expect(mocks.audioAnalysis.resetPending).not.toHaveBeenCalled();
     });
 
     it('should not start a job that is already running', async () => {

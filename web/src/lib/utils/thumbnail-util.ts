@@ -10,6 +10,10 @@ export const getAltText = derived(t, ($t) => {
       dateStyle: 'long',
       timeZone: 'UTC',
     });
+    if (asset.isAudio) {
+      return $t('audio_alt_text_date', { values: { date } });
+    }
+
     const hasPlace = asset.city && asset.country;
 
     const peopleCount = asset.people?.length ?? 0;

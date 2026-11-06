@@ -82,6 +82,9 @@ const heifImage: Record<string, string[]> = Object.fromEntries(
 
 const extensionOverrides: Record<string, string> = {
   'image/jpeg': '.jpg',
+  'audio/mp4': '.m4a',
+  'audio/ogg': '.ogg',
+  'audio/aiff': '.aiff',
 };
 
 const transparentCapableExtensions = new Set([
@@ -138,11 +141,29 @@ const video: Record<string, string[]> = {
   '.wmv': ['video/x-ms-wmv'],
 };
 
+const audio: Record<string, string[]> = {
+  '.aac': ['audio/aac'],
+  '.aif': ['audio/aiff', 'audio/x-aiff'],
+  '.aiff': ['audio/aiff', 'audio/x-aiff'],
+  '.alac': ['audio/mp4'],
+  '.amr': ['audio/amr'],
+  '.caf': ['audio/x-caf'],
+  '.flac': ['audio/flac', 'audio/x-flac'],
+  '.m4a': ['audio/mp4', 'audio/x-m4a'],
+  '.m4b': ['audio/mp4'],
+  '.mp3': ['audio/mpeg', 'audio/mp3'],
+  '.oga': ['audio/ogg'],
+  '.ogg': ['audio/ogg'],
+  '.opus': ['audio/ogg', 'audio/opus'],
+  '.wav': ['audio/wav', 'audio/x-wav', 'audio/wave'],
+  '.wma': ['audio/x-ms-wma'],
+};
+
 const sidecar: Record<string, string[]> = {
   '.xmp': ['application/xml', 'text/xml'],
 };
 
-const types = { ...image, ...video, ...sidecar };
+const types = { ...image, ...video, ...audio, ...sidecar };
 
 const isType = (filename: string, r: Record<string, string[]>) =>
   Object.hasOwn(r, getFilenameExtension(filename).toLowerCase());
@@ -158,13 +179,15 @@ const toExtension = (mimeType: string) => {
 
 export const mimeTypes = {
   image,
+  audio,
   profile,
   sidecar,
   video,
   raw,
   webUnsupportedImage,
 
-  isAsset: (filename: string) => isType(filename, image) || isType(filename, video),
+  isAsset: (filename: string) => isType(filename, image) || isType(filename, video) || isType(filename, audio),
+  isAudio: (filename: string) => isType(filename, audio),
   isImage: (filename: string) => isType(filename, image),
   isWebSupportedImage: (filename: string) => isType(filename, webSupportedImage),
   isHeifImage: (filename: string) => isType(filename, heifImage),
@@ -188,7 +211,11 @@ export const mimeTypes = {
       return AssetType.Video;
     }
 
+    if (contentType.startsWith('audio/')) {
+      return AssetType.Audio;
+    }
+
     return AssetType.Other;
   },
-  getSupportedFileExtensions: () => [...Object.keys(image), ...Object.keys(video)],
+  getSupportedFileExtensions: () => [...Object.keys(image), ...Object.keys(video), ...Object.keys(audio)],
 };

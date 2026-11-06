@@ -1,5 +1,5 @@
 import { Kysely } from 'kysely';
-import { AssetFileType } from 'src/enum.js';
+import { AssetFileType, AssetType } from 'src/enum.js';
 import { AssetJobRepository } from 'src/repositories/asset-job.repository.js';
 import { LoggingRepository } from 'src/repositories/logging.repository.js';
 import { DB } from 'src/schema/index.js';
@@ -30,6 +30,60 @@ beforeAll(async () => {
 });
 
 describe(AssetJobRepository.name, () => {
+  describe('audio jobs', () => {
+    const userIds = new Set<string>();
+
+    afterEach(async () => {
+      if (userIds.size === 0) {
+        return;
+      }
+
+      await defaultDatabase
+        .deleteFrom('user')
+        .where('id', 'in', [...userIds])
+        .execute();
+      userIds.clear();
+    });
+
+    it('should queue audio for transcoding without requiring video metadata', async () => {
+      const { ctx, sut } = setup();
+      const { user } = await ctx.newUser();
+      userIds.add(user.id);
+      const { asset } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Audio });
+
+      await ctx.newExif({ assetId: asset.id, fileSizeInByte: 100 });
+
+      await expect(consume(sut.streamForVideoConversion())).resolves.toContainEqual({ id: asset.id });
+      await expect(sut.getForVideoConversion(asset.id)).resolves.toMatchObject({
+        id: asset.id,
+        type: AssetType.Audio,
+        videoStream: null,
+        format: null,
+      });
+    });
+
+    it('should exclude audio covers from vision machine learning, including forced jobs', async () => {
+      const { ctx, sut } = setup();
+      const { user } = await ctx.newUser();
+      userIds.add(user.id);
+      const { asset } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Audio });
+      await ctx.newJobStatus({ assetId: asset.id, metadataExtractedAt: new Date() });
+      await ctx.newExif({ assetId: asset.id, fileSizeInByte: 100 });
+      await ctx.newAssetFile({ assetId: asset.id, type: AssetFileType.Preview, path: 'audio_preview.jpg' });
+
+      await expect(sut.getForClipEncoding(asset.id)).resolves.toMatchObject({ type: AssetType.Audio });
+      await expect(sut.getForDetectFacesJob(asset.id)).resolves.toMatchObject({ type: AssetType.Audio });
+      await expect(sut.getForOcr(asset.id)).resolves.toMatchObject({ type: AssetType.Audio });
+      for (const stream of [
+        sut.streamForEncodeClip(true),
+        sut.streamForDetectFacesJob(true),
+        sut.streamForOcrJob(true),
+      ]) {
+        await expect(consume(stream)).resolves.not.toContainEqual({ id: asset.id });
+      }
+    });
+  });
+
   describe('streamForThumbnailJob', () => {
     it('should work', async () => {
       const { sut } = setup();

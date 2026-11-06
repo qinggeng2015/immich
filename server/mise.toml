@@ -13,6 +13,10 @@ run = "vitest --config test/vitest.config.mjs"
 env._.path = "./node_modules/.bin"
 run = "vitest --config test/vitest.config.medium.mjs"
 
+[tasks."test-audio"]
+env._.path = "./node_modules/.bin"
+run = "vitest --config test/vitest.config.audio.mjs --run"
+
 [tasks.format]
 env._.path = "./node_modules/.bin"
 run = "prettier --check ."
@@ -27,6 +31,14 @@ run = "eslint \"src/**/*.ts\" \"test/**/*.ts\" --max-warnings 0"
 
 [tasks."lint-fix"]
 run = { task = "lint --fix" }
+
+[tasks."lint:files"]
+env._.path = "./node_modules/.bin"
+run = "eslint --max-warnings 0"
+
+[tasks."format:files"]
+env._.path = "./node_modules/.bin"
+run = "prettier --write"
 
 [tasks.check]
 env._.path = "./node_modules/.bin"
@@ -44,7 +56,8 @@ run = "sql-tools -u ${DB_URL:-postgres://postgres:postgres@localhost:5432/immich
 description = "Run database migration commands (create, generate, run, sync-order, verify-order, ...)"
 
 [tasks."schema-drop"]
-run = { task = "migrations query 'DROP schema public cascade; CREATE schema public;'" }
+env._.path = "./node_modules/.bin"
+run = "sql-tools -u ${DB_URL:-postgres://postgres:postgres@localhost:5432/immich} query 'DROP schema public cascade; CREATE schema public;'"
 
 [tasks."schema-reset"]
 run = [{ task = ":schema-drop" }, { task = "migrations run" }]

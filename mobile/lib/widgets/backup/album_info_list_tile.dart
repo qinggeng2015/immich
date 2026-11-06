@@ -14,8 +14,11 @@ import 'package:immich_mobile/widgets/common/immich_toast.dart';
 
 class AlbumInfoListTile extends HookConsumerWidget {
   final LocalAlbum album;
+  final Widget? trailingAction;
+  final Widget? previewAction;
+  final String? statusText;
 
-  const AlbumInfoListTile({super.key, required this.album});
+  const AlbumInfoListTile({super.key, required this.album, this.trailingAction, this.previewAction, this.statusText});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -45,6 +48,15 @@ class AlbumInfoListTile extends HookConsumerWidget {
     }
 
     Widget buildSubtitle() {
+      if (statusText != null) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(album.assetCount.toString()),
+            Text(statusText!, style: context.textTheme.labelLarge?.copyWith(color: context.colorScheme.error)),
+          ],
+        );
+      }
       return Text(
         album.isIosSharedAlbum ? '${album.assetCount} (iCloud Shared Album)' : album.assetCount.toString(),
         style: context.textTheme.labelLarge?.copyWith(color: context.colorScheme.onSurfaceSecondary),
@@ -85,12 +97,19 @@ class AlbumInfoListTile extends HookConsumerWidget {
         leading: buildIcon(),
         title: Text(album.name, style: context.textTheme.titleSmall),
         subtitle: buildSubtitle(),
-        trailing: IconButton(
-          onPressed: () {
-            unawaited(context.pushRoute(LocalTimelineRoute(album: album)));
-          },
-          icon: Icon(Icons.image_outlined, color: context.primaryColor, size: 24),
-          splashRadius: 25,
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            previewAction ??
+                IconButton(
+                  onPressed: () {
+                    unawaited(context.pushRoute(LocalTimelineRoute(album: album)));
+                  },
+                  icon: Icon(Icons.image_outlined, color: context.primaryColor, size: 24),
+                  splashRadius: 25,
+                ),
+            ?trailingAction,
+          ],
         ),
       ),
     );

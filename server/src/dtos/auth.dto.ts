@@ -16,6 +16,9 @@ export const pinCodeRegex = /^\d{6}$/;
 
 export type AuthDto = {
   user: AuthUser;
+  audioSupported?: boolean;
+  audioAnalysisSupported?: boolean;
+  audioSummarySupported?: boolean;
   apiKey?: AuthApiKey;
   sharedLink?: AuthSharedLink;
   session?: AuthSession;

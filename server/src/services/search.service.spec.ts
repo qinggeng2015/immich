@@ -218,6 +218,30 @@ describe(SearchService.name, () => {
   });
 
   describe('new shape routing', () => {
+    it.each([
+      { transcript: 'private words' },
+      { filter: { transcript: { matches: 'private words' } } },
+      { filter: { or: [{ transcript: { matches: 'private words' } }] } },
+    ])('should reject shared-link transcript searches before accessing search data: %j', async (query) => {
+      const auth = AuthFactory.from().sharedLink().build();
+      await expect(sut.searchMetadata(auth, { size: 250, ...query })).rejects.toThrow(
+        'Audio transcript search is not available through shared links',
+      );
+      expect(mocks.search.searchMetadata).not.toHaveBeenCalled();
+      expect(mocks.search.searchMetadataV3).not.toHaveBeenCalled();
+    });
+
+    it('should keep transcript searches available after speech processing is disabled', async () => {
+      const auth = AuthFactory.create();
+      mocks.systemMetadata.get.mockResolvedValue({ machineLearning: { enabled: false } });
+      mocks.search.searchMetadata.mockResolvedValue({ hasNextPage: false, items: [] });
+      await sut.searchMetadata(auth, { size: 250, transcript: 'existing transcript' });
+      expect(mocks.search.searchMetadata).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ transcript: 'existing transcript' }),
+      );
+    });
+
     it('should route a filter request to the V3 search and a flat request to the legacy search', async () => {
       const auth = AuthFactory.create();
 

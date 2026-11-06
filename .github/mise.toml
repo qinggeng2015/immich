@@ -8,3 +8,28 @@ run = "prettier --check ."
 [tasks."format-fix"]
 env._.path = "./node_modules/.bin"
 run = "prettier --write ."
+
+[tasks."release:prepare"]
+dir = ".."
+run = "node .github/scripts/fork-release.mjs prepare"
+
+[tasks."release:packages"]
+dir = ".."
+run = [
+  { task = "//:sdk:install" },
+  { task = "//:sdk:build" },
+  { task = "//packages/cli:install" },
+  "node .github/scripts/fork-release.mjs packages",
+]
+
+[tasks."release:manifest"]
+dir = ".."
+run = "node .github/scripts/fork-release.mjs manifest"
+
+[tasks."release:publish"]
+dir = ".."
+run = "node .github/scripts/fork-release.mjs publish"
+
+[tasks."release:test"]
+dir = ".."
+run = "node --test .github/scripts/fork-release.test.mjs"

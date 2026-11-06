@@ -1,5 +1,5 @@
 import { Kysely } from 'kysely';
-import { SyncEntityType, SyncRequestType } from 'src/enum.js';
+import { AssetType, SyncEntityType, SyncRequestType } from 'src/enum.js';
 import { AssetRepository } from 'src/repositories/asset.repository.js';
 import { DB } from 'src/schema/index.js';
 import { SyncTestContext } from 'test/medium.factory.js';
@@ -20,6 +20,38 @@ beforeAll(async () => {
 });
 
 describe(SyncEntityType.AssetV2, () => {
+  it.each([false, true])('should preserve audio sync checkpoints with capability %s', async (audioSupported) => {
+    const { auth, ctx } = await setup();
+    const clientAuth = { ...auth, audioSupported };
+    const { asset } = await ctx.newAsset({ ownerId: auth.user.id, type: AssetType.Audio, duration: 120_000 });
+    const { asset: image } = await ctx.newAsset({ ownerId: auth.user.id, type: AssetType.Image });
+    const { asset: video } = await ctx.newAsset({ ownerId: auth.user.id, type: AssetType.Video });
+
+    const response = await ctx.syncStream(clientAuth, [SyncRequestType.AssetsV2]);
+    expect(response).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: SyncEntityType.AssetV2,
+          data: expect.objectContaining({
+            id: asset.id,
+            type: audioSupported ? AssetType.Audio : AssetType.Other,
+            duration: 120_000,
+          }),
+        }),
+        expect.objectContaining({
+          type: SyncEntityType.AssetV2,
+          data: expect.objectContaining({ id: image.id, type: AssetType.Image }),
+        }),
+        expect.objectContaining({
+          type: SyncEntityType.AssetV2,
+          data: expect.objectContaining({ id: video.id, type: AssetType.Video }),
+        }),
+      ]),
+    );
+    await ctx.syncAckAll(clientAuth, response);
+    await ctx.assertSyncIsComplete(clientAuth, [SyncRequestType.AssetsV2]);
+  });
+
   it('should detect and sync the first asset', async () => {
     const originalFileName = 'firstAsset';
     const checksum = '1115vHcVkZzNp3Q9G+FEA0nu6zUbGb4Tj4UOXkN0wRA=';

@@ -1,3 +1,4 @@
+import { ServerFeaturesDto, ServerMediaTypesResponseDto } from 'src/dtos/server.dto.js';
 import { SystemMetadataKey } from 'src/enum.js';
 import { ServerService } from 'src/services/server.service.js';
 import { mockEnvData } from 'test/repositories/config.repository.mock.js';
@@ -132,8 +133,25 @@ describe(ServerService.name, () => {
   });
 
   describe('getFeatures', () => {
+    it('accepts feature responses from servers without audio support', async () => {
+      const features = await sut.getFeatures();
+      delete features.audio;
+      delete features.audioWaveform;
+      delete features.speechToText;
+      delete features.audioSummary;
+
+      expect(ServerFeaturesDto.schema.parse(features).audio).toBeUndefined();
+      expect(ServerFeaturesDto.schema.parse(features).audioWaveform).toBeUndefined();
+      expect(ServerFeaturesDto.schema.parse(features).speechToText).toBeUndefined();
+      expect(ServerFeaturesDto.schema.parse(features).audioSummary).toBeUndefined();
+    });
+
     it('should respond the server features', async () => {
       await expect(sut.getFeatures()).resolves.toEqual({
+        audio: true,
+        audioWaveform: true,
+        speechToText: true,
+        audioSummary: true,
         smartSearch: true,
         duplicateDetection: true,
         facialRecognition: true,
@@ -153,6 +171,22 @@ describe(ServerService.name, () => {
         realtimeTranscoding: false,
       });
       expect(mocks.systemMetadata.get).toHaveBeenCalled();
+    });
+  });
+
+  describe('getSupportedMediaTypes', () => {
+    it('advertises audio without replacing image and video support', () => {
+      const mediaTypes = sut.getSupportedMediaTypes();
+
+      expect(mediaTypes.audio).toEqual(expect.arrayContaining(['.mp3', '.flac', '.wav']));
+      expect(mediaTypes.image).toContain('.jpg');
+      expect(mediaTypes.video).toContain('.mp4');
+    });
+
+    it('accepts media types from servers without audio support', () => {
+      expect(
+        ServerMediaTypesResponseDto.schema.parse({ image: ['.jpg'], video: ['.mp4'], sidecar: [] }).audio,
+      ).toBeUndefined();
     });
   });
 

@@ -147,6 +147,10 @@ class MemoryPage extends HookConsumerWidget {
         asset = memories[nextMemoryIndex].assets.first;
       }
 
+      if (asset.isAudio) {
+        return;
+      }
+
       // Precache the asset
       final size = MediaQuery.sizeOf(context);
       await precacheImage(getFullImageProvider(asset, size: Size(size.width, size.height)), context, size: size);
@@ -302,6 +306,8 @@ class MemoryPage extends HookConsumerWidget {
                                         ),
                                       ),
 
+                                      if (asset.isAudio) const Expanded(flex: 2, child: SizedBox()),
+
                                       // Right side of the screen
                                       Expanded(
                                         child: GestureDetector(
@@ -336,11 +342,14 @@ class MemoryPage extends HookConsumerWidget {
                             child: const Icon(Icons.close_rounded, color: Colors.white),
                           ),
                         ),
-                        if (currentAsset.value != null && currentAsset.value!.isVideo)
+                        if (currentAsset.value != null && (currentAsset.value!.isVideo || currentAsset.value!.isAudio))
                           Positioned(
                             bottom: 24,
                             right: 32,
-                            child: Icon(Icons.videocam_outlined, color: Colors.grey[200]),
+                            child: Icon(
+                              currentAsset.value!.isAudio ? Icons.audiotrack_outlined : Icons.videocam_outlined,
+                              color: Colors.grey[200],
+                            ),
                           ),
                       ],
                     ),

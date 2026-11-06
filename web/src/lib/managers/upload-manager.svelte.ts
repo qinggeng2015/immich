@@ -1,4 +1,5 @@
 import { eventManager } from '#lib/managers/event-manager.svelte.ts';
+import { featureFlagsManager } from '#lib/managers/feature-flags-manager.svelte.ts';
 import { uploadAssetsStore } from '#lib/stores/upload.ts';
 import { cancelUploadRequests } from '#lib/utils.ts';
 import { getSupportedMediaTypes, type ServerMediaTypesResponseDto } from '@immich/sdk';
@@ -27,7 +28,11 @@ class UploadManager {
   }
 
   getExtensions() {
-    return [...this.mediaTypes.image, ...this.mediaTypes.video];
+    return [
+      ...this.mediaTypes.image,
+      ...this.mediaTypes.video,
+      ...(featureFlagsManager.supportsAudio ? (this.mediaTypes.audio ?? []) : []),
+    ];
   }
 }
 

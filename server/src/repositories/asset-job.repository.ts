@@ -206,6 +206,7 @@ export class AssetJobRepository {
           .innerJoin('asset_job_status as job_status', 'job_status.assetId', 'asset.id')
           .where('job_status.duplicatesDetectedAt', 'is', null),
       )
+      .where('asset.type', 'in', [AssetType.Image, AssetType.Video])
       .stream();
   }
 
@@ -216,6 +217,7 @@ export class AssetJobRepository {
       .$if(!force, (qb) =>
         qb.where((eb) => eb.not((eb) => eb.exists(eb.selectFrom('smart_search').whereRef('assetId', '=', 'asset.id')))),
       )
+      .where('asset.type', 'in', [AssetType.Image, AssetType.Video])
       .stream();
   }
 
@@ -223,7 +225,7 @@ export class AssetJobRepository {
   getForClipEncoding(id: string) {
     return this.db
       .selectFrom('asset')
-      .select(['asset.id', 'asset.visibility'])
+      .select(['asset.id', 'asset.visibility', 'asset.type'])
       .select((eb) => withFiles(eb, AssetFileType.Preview))
       .where('asset.id', '=', id)
       .executeTakeFirst();
@@ -233,7 +235,7 @@ export class AssetJobRepository {
   getForDetectFacesJob(id: string) {
     return this.db
       .selectFrom('asset')
-      .select(['asset.id', 'asset.visibility'])
+      .select(['asset.id', 'asset.visibility', 'asset.type'])
       .$call(withExifInner)
       .select((eb) => withFaces(eb, true, true))
       .select((eb) =>
@@ -255,9 +257,97 @@ export class AssetJobRepository {
   getForOcr(id: string) {
     return this.db
       .selectFrom('asset')
-      .select((eb) => ['asset.ownerId', 'asset.visibility', withFilePath(eb, AssetFileType.Preview).as('previewFile')])
+      .select((eb) => [
+        'asset.ownerId',
+        'asset.visibility',
+        'asset.type',
+        withFilePath(eb, AssetFileType.Preview).as('previewFile'),
+      ])
       .where('asset.id', '=', id)
       .executeTakeFirst();
+  }
+
+  @GenerateSql({ params: [DummyValue.UUID] })
+  getForAudioAnalysis(id: string) {
+    return this.db
+      .selectFrom('asset')
+      .select([
+        'asset.id',
+        'asset.ownerId',
+        'asset.type',
+        'asset.visibility',
+        'asset.originalPath',
+        'asset.checksum',
+        'asset.fileModifiedAt',
+        'asset.deletedAt',
+        'asset.isOffline',
+      ])
+      .where('asset.id', '=', id)
+      .executeTakeFirst();
+  }
+
+  @GenerateSql({ params: ['waveform', false], stream: true })
+  streamForAudioAnalysis(kind: 'waveform' | 'transcript', force?: boolean) {
+    return this.db
+      .selectFrom('asset')
+      .leftJoin('asset_audio_analysis', 'asset_audio_analysis.assetId', 'asset.id')
+      .select('asset.id')
+      .where('asset.type', '=', AssetType.Audio)
+      .where('asset.deletedAt', 'is', null)
+      .where('asset.isOffline', '=', false)
+      .where('asset.visibility', '!=', AssetVisibility.Hidden)
+      .$if(!force, (qb) =>
+        qb.where((eb) =>
+          eb.or([
+            eb(kind === 'waveform' ? 'asset_audio_analysis.waveform' : 'asset_audio_analysis.transcript', 'is', null),
+            eb(
+              kind === 'waveform' ? 'asset_audio_analysis.waveformChecksum' : 'asset_audio_analysis.transcriptChecksum',
+              'is distinct from',
+              eb.ref('asset.checksum'),
+            ),
+            eb(
+              kind === 'waveform'
+                ? 'asset_audio_analysis.waveformSourceModifiedAt'
+                : 'asset_audio_analysis.transcriptSourceModifiedAt',
+              'is distinct from',
+              eb.ref('asset.fileModifiedAt'),
+            ),
+          ]),
+        ),
+      )
+      .stream();
+  }
+
+  @GenerateSql({ params: [false, 'config-hash'], stream: true })
+  streamForAudioSummary(force: boolean | undefined, configHash: string) {
+    return this.db
+      .selectFrom('asset')
+      .innerJoin('asset_audio_analysis', 'asset_audio_analysis.assetId', 'asset.id')
+      .select('asset.id')
+      .where('asset.type', '=', AssetType.Audio)
+      .where('asset.deletedAt', 'is', null)
+      .where('asset.isOffline', '=', false)
+      .where('asset.visibility', '!=', AssetVisibility.Hidden)
+      .where('asset_audio_analysis.transcript', 'is not', null)
+      .where(sql<string>`trim(coalesce(asset_audio_analysis.transcript->>'text', ''))`, '!=', '')
+      .whereRef('asset_audio_analysis.transcriptChecksum', '=', 'asset.checksum')
+      .whereRef('asset_audio_analysis.transcriptSourceModifiedAt', '=', 'asset.fileModifiedAt')
+      .$if(!force, (qb) =>
+        qb.where((eb) =>
+          eb.or([
+            eb('asset_audio_analysis.summary', 'is', null),
+            eb('asset_audio_analysis.summaryChecksum', 'is distinct from', eb.ref('asset.checksum')),
+            eb('asset_audio_analysis.summarySourceModifiedAt', 'is distinct from', eb.ref('asset.fileModifiedAt')),
+            eb(
+              'asset_audio_analysis.summaryTranscriptRevision',
+              'is distinct from',
+              eb.ref('asset_audio_analysis.transcriptRevision'),
+            ),
+            eb('asset_audio_analysis.summaryConfigHash', 'is distinct from', configHash),
+          ]),
+        ),
+      )
+      .stream();
   }
 
   @GenerateSql({ params: [[DummyValue.UUID]] })
@@ -327,7 +417,7 @@ export class AssetJobRepository {
     return this.db
       .selectFrom('asset')
       .select(['asset.id'])
-      .where('asset.type', '=', sql.lit(AssetType.Video))
+      .where('asset.type', 'in', [AssetType.Video, AssetType.Audio])
       .$if(!force, (qb) =>
         qb.where((eb) =>
           eb.not(
@@ -350,15 +440,15 @@ export class AssetJobRepository {
     return this.db
       .selectFrom('asset')
       .innerJoin('asset_exif', 'asset.id', 'asset_exif.assetId')
-      .innerJoin('asset_video', 'asset_video.assetId', 'asset.id')
+      .leftJoin('asset_video', 'asset_video.assetId', 'asset.id')
       .leftJoin('asset_audio', 'asset_audio.assetId', 'asset.id')
-      .select(['asset.id', 'asset.ownerId', 'asset.originalPath'])
+      .select(['asset.id', 'asset.ownerId', 'asset.originalPath', 'asset.type'])
       .select(withFiles)
       .select((eb) => withAudioStream(eb).as('audioStream'))
-      .select((eb) => withVideoStream(eb).$notNull().as('videoStream'))
-      .select((eb) => withVideoFormat(eb).$notNull().as('format'))
+      .select((eb) => withVideoStream(eb).as('videoStream'))
+      .select((eb) => withVideoFormat(eb).as('format'))
       .where('asset.id', '=', id)
-      .where('asset.type', '=', sql.lit(AssetType.Video))
+      .where('asset.type', 'in', [AssetType.Video, AssetType.Audio])
       .executeTakeFirst();
   }
 
@@ -448,6 +538,7 @@ export class AssetJobRepository {
       .$if(force === false, (qb) => qb.where('job_status.facesRecognizedAt', 'is', null))
       .select(['asset.id'])
       .orderBy('asset.fileCreatedAt', 'desc')
+      .where('asset.type', 'in', [AssetType.Image, AssetType.Video])
       .stream();
   }
 
@@ -463,6 +554,7 @@ export class AssetJobRepository {
       )
       .where('asset.deletedAt', 'is', null)
       .where('asset.visibility', '!=', AssetVisibility.Hidden)
+      .where('asset.type', 'in', [AssetType.Image, AssetType.Video])
       .stream();
   }
 

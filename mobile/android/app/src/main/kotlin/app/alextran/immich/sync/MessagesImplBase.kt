@@ -12,26 +12,34 @@ import android.util.Base64
 import android.util.Log
 import androidx.core.database.getStringOrNull
 import app.alextran.immich.core.ImmichPlugin
+import app.alextran.immich.directories.SelectedDirectoryStore
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.ImageHeaderParser
 import com.bumptech.glide.load.ImageHeaderParserUtils
 import com.bumptech.glide.load.resource.bitmap.DefaultImageHeaderParser
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
+import io.flutter.embedding.engine.plugins.FlutterPlugin
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.cancellation.CancellationException
 
 sealed class AssetResult {
@@ -44,16 +52,24 @@ private const val TAG = "NativeSyncApiImplBase"
 @SuppressLint("InlinedApi")
 open class NativeSyncApiImplBase(context: Context) : ImmichPlugin(), ActivityAware {
   private val ctx: Context = context.applicationContext
+  protected val directoryStore = SelectedDirectoryStore(ctx)
 
   private var hashTask: Job? = null
   private var syncJob: Job? = null
+  private val taskLock = Any()
+  private var closed = false
+  private var engineGeneration = 0L
   private val mediaTrashDelegate = MediaTrashDelegate(ctx)
+
+  private enum class TaskType(val label: String, val cancellationCode: String) {
+    SYNC("sync", "SYNC_CANCELLED"),
+    HASH("hash", "HASH_CANCELLED")
+  }
 
   companion object {
     private const val MAX_CONCURRENT_HASH_OPERATIONS = 16
     private val hashSemaphore = Semaphore(MAX_CONCURRENT_HASH_OPERATIONS)
-    private const val HASHING_CANCELLED_CODE = "HASH_CANCELLED"
-    private const val SYNC_CANCELLED_CODE = "SYNC_CANCELLED"
+    private val requestIds = AtomicLong()
 
     // MediaStore.Files.FileColumns.SPECIAL_FORMAT — S Extensions 21+
     // https://developer.android.com/reference/android/provider/MediaStore.Files.FileColumns#SPECIAL_FORMAT
@@ -304,6 +320,17 @@ open class NativeSyncApiImplBase(context: Context) : ImmichPlugin(), ActivityAwa
   }
 
   private suspend fun getAlbums(): List<PlatformAlbum> {
+    val mediaAlbums = try {
+      getMediaStoreAlbums()
+    } catch (error: SecurityException) {
+      if (!directoryStore.hasDirectories) throw error
+      emptyList()
+    }
+    val directoryAlbums = runInterruptible { directoryStore.getAlbums() }
+    return (mediaAlbums + directoryAlbums).sortedBy { it.id }
+  }
+
+  private suspend fun getMediaStoreAlbums(): List<PlatformAlbum> {
     val albums = mutableListOf<PlatformAlbum>()
     val albumsCount = mutableMapOf<String, Int>()
 
@@ -357,6 +384,7 @@ open class NativeSyncApiImplBase(context: Context) : ImmichPlugin(), ActivityAwa
   }
 
   private fun getAssetIdsForAlbum(albumId: String): List<String> {
+    if (albumId.startsWith("saf-folder:")) return directoryStore.getAssetIds(albumId)
     val projection = arrayOf(MediaStore.MediaColumns._ID)
 
     return getCursor(
@@ -373,7 +401,8 @@ open class NativeSyncApiImplBase(context: Context) : ImmichPlugin(), ActivityAwa
   }
 
   fun getAssetsCountSince(albumId: String, timestamp: Long): Long =
-    getCursor(
+    if (albumId.startsWith("saf-folder:")) directoryStore.getAssetsCountSince(albumId, timestamp)
+    else getCursor(
       MediaStore.VOLUME_EXTERNAL,
       "$BUCKET_SELECTION AND ${MediaStore.Files.FileColumns.DATE_ADDED} > ? AND $MEDIA_SELECTION",
       arrayOf(albumId, timestamp.toString(), *MEDIA_SELECTION_ARGS),
@@ -389,6 +418,11 @@ open class NativeSyncApiImplBase(context: Context) : ImmichPlugin(), ActivityAwa
   }
 
   private fun getAssetsForAlbum(albumId: String, updatedTimeCond: Long?): List<PlatformAsset> {
+    if (albumId.startsWith("saf-folder:")) {
+      return directoryStore.getAssets(albumId).filter {
+        updatedTimeCond == null || (it.updatedAt ?: 0) > updatedTimeCond || (it.createdAt ?: 0) > updatedTimeCond
+      }
+    }
     var selection = "$BUCKET_SELECTION AND $MEDIA_SELECTION"
     val selectionArgs = mutableListOf(albumId, *MEDIA_SELECTION_ARGS)
 
@@ -411,40 +445,26 @@ open class NativeSyncApiImplBase(context: Context) : ImmichPlugin(), ActivityAwa
     callback: (Result<List<HashResult>>) -> Unit
   ) {
     if (assetIds.isEmpty()) {
-      completeWhenActive(callback, Result.success(emptyList()))
+      synchronized(taskLock) {
+        if (!closed) completeWhenActive(callback, Result.success(emptyList()))
+      }
       return
     }
 
-    hashTask?.cancel()
-    hashTask = CoroutineScope(Dispatchers.IO).launch {
-      try {
-        val results = assetIds.map { assetId ->
-          async {
-            hashSemaphore.withPermit {
-              ensureActive()
-              hashAsset(assetId)
-            }
+    runTask(TaskType.HASH, callback) {
+      assetIds.map { assetId ->
+        async {
+          hashSemaphore.withPermit {
+            ensureActive()
+            hashAsset(assetId)
           }
-        }.awaitAll()
-
-        completeWhenActive(callback, Result.success(results))
-      } catch (_: CancellationException) {
-        completeWhenActive(
-          callback, Result.failure(
-            FlutterError(
-              HASHING_CANCELLED_CODE,
-              "Hashing operation was cancelled",
-              null
-            )
-          )
-        )
-      } catch (e: Exception) {
-        completeWhenActive(callback, Result.failure(e))
-      }
+        }
+      }.awaitAll()
     }
   }
 
   private suspend fun hashAsset(assetId: String): HashResult {
+    if (assetId.startsWith("saf-file:")) return runInterruptible { directoryStore.hashAsset(assetId) }
     return try {
       val digest = MessageDigest.getInstance("SHA-1")
       openOriginalStream(assetId).use { inputStream ->
@@ -499,29 +519,106 @@ open class NativeSyncApiImplBase(context: Context) : ImmichPlugin(), ActivityAwa
     } ?: MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE
 
   fun cancelHashing() {
-    hashTask?.cancel()
-    hashTask = null
+    val task = synchronized(taskLock) { hashTask.also { hashTask = null } }
+    task?.cancel()
   }
 
   fun cancelSync() {
-    syncJob?.cancel()
-    syncJob = null
+    val task = synchronized(taskLock) { syncJob.also { syncJob = null } }
+    task?.cancel()
   }
 
   protected fun <T> runSync(callback: (Result<T>) -> Unit, work: suspend () -> T) {
-    syncJob?.cancel()
-    syncJob = CoroutineScope(Dispatchers.IO).launch {
-      try {
-        completeWhenActive(callback, Result.success(work()))
-      } catch (_: CancellationException) {
-        completeWhenActive(
-          callback,
-          Result.failure(FlutterError(SYNC_CANCELLED_CODE, "Sync cancelled", null))
-        )
-      } catch (e: Exception) {
-        completeWhenActive(callback, Result.failure(e))
+    runTask(TaskType.SYNC, callback) { work() }
+  }
+
+  private fun <T> runTask(
+    type: TaskType,
+    callback: (Result<T>) -> Unit,
+    work: suspend CoroutineScope.() -> T
+  ) {
+    val generation = synchronized(taskLock) { engineGeneration }
+    val requestId = requestIds.incrementAndGet()
+    val completed = AtomicBoolean()
+    fun complete(result: Result<T>, status: String) {
+      if (completed.compareAndSet(false, true)) {
+        synchronized(taskLock) {
+          Log.i(TAG, "${type.label} request $requestId $status")
+          if (!closed && generation == engineGeneration) completeWhenActive(callback, result)
+        }
       }
     }
+    fun cancelResult(): Result<T> = Result.failure(FlutterError(type.cancellationCode, "Operation cancelled", null))
+
+    Log.i(TAG, "${type.label} request $requestId queued")
+    val task = CoroutineScope(Dispatchers.IO).launch(start = CoroutineStart.LAZY) {
+      try {
+        ensureActive()
+        Log.i(TAG, "${type.label} request $requestId started")
+        val result = coroutineScope { work() }
+        ensureActive()
+        complete(Result.success(result), "completed")
+      } catch (_: CancellationException) {
+        complete(cancelResult(), "cancelled")
+      } catch (e: Exception) {
+        if (isActive) {
+          complete(Result.failure(e), "failed")
+        } else {
+          complete(cancelResult(), "cancelled")
+        }
+      }
+    }
+    task.invokeOnCompletion { cause ->
+      when (cause) {
+        is CancellationException -> complete(cancelResult(), "cancelled")
+        null -> Unit
+        else -> complete(Result.failure(cause), "failed")
+      }
+      synchronized(taskLock) {
+        when (type) {
+          TaskType.SYNC -> if (syncJob === task) syncJob = null
+          TaskType.HASH -> if (hashTask === task) hashTask = null
+        }
+      }
+    }
+    val previous = synchronized(taskLock) {
+      if (closed || generation != engineGeneration) {
+        task.cancel()
+        return
+      }
+      when (type) {
+        TaskType.SYNC -> syncJob.also { syncJob = task }
+        TaskType.HASH -> hashTask.also { hashTask = task }
+      }
+    }
+    previous?.cancel()
+    task.start()
+  }
+
+  fun close() {
+    val tasks = synchronized(taskLock) {
+      closed = true
+      engineGeneration++
+      detachFromEngine()
+      listOfNotNull(syncJob, hashTask).also {
+        syncJob = null
+        hashTask = null
+      }
+    }
+    tasks.forEach { it.cancel() }
+  }
+
+  override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+    synchronized(taskLock) {
+      super.onAttachedToEngine(binding)
+      engineGeneration++
+      closed = false
+    }
+  }
+
+  override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+    close()
+    super.onDetachedFromEngine(binding)
   }
 
   fun restoreFromTrashById(mediaId: String, type: Long, callback: (Result<Boolean>) -> Unit) {

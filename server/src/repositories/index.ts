@@ -8,6 +8,8 @@ import { AssetEditRepository } from 'src/repositories/asset-edit.repository.js';
 import { AssetFileRepository } from 'src/repositories/asset-file.repository.js';
 import { AssetJobRepository } from 'src/repositories/asset-job.repository.js';
 import { AssetRepository } from 'src/repositories/asset.repository.js';
+import { AudioAnalysisRepository } from 'src/repositories/audio-analysis.repository.js';
+import { AudioSummaryRepository } from 'src/repositories/audio-summary.repository.js';
 import { AuthChallengeRepository } from 'src/repositories/auth-challenge.repository.js';
 import { ClusterGroupRepository } from 'src/repositories/cluster-group.repository.js';
 import { ConfigRepository } from 'src/repositories/config.repository.js';
@@ -69,6 +71,8 @@ export const repositories = [
   AssetEditRepository,
   AssetFileRepository,
   AssetJobRepository,
+  AudioAnalysisRepository,
+  AudioSummaryRepository,
   AuthChallengeRepository,
   ConfigRepository,
   CronRepository,

@@ -93,6 +93,47 @@ const AdminConfigMachineLearningModelSchema = AdminConfigMachineLearningTaskSche
   modelName: z.string().describe('Name of the model to use'),
 });
 
+export const speechToTextDefaults = {
+  enabled: true,
+  autoTranscribe: true,
+  modelName: 'SenseVoiceSmall',
+  language: 'auto' as const,
+};
+
+export const audioSummaryDefaults = {
+  enabled: false,
+  autoSummarize: true,
+  baseUrl: 'https://api.openai.com/v1',
+  apiKey: '',
+  modelName: 'gpt-6.1-terra',
+  prompt: '请使用转写文本的原始语言生成简明摘要，涵盖主要内容和结论。仅依据转写文本中的信息，不得编造细节。',
+  protocol: 'chat-completions' as const,
+  maxOutputTokens: 2048,
+  timeoutMs: 120_000,
+};
+
+const AdminConfigAudioSummarySchema = AdminConfigMachineLearningModelSchema.extend({
+  autoSummarize: z.boolean().describe('Automatically summarize completed audio transcripts').meta({ visibility: User }),
+  modelName: z.string().trim().max(256).describe('Name of the summary model to use'),
+  baseUrl: z.string().trim().max(4096).describe('OpenAI-compatible API base URL'),
+  apiKey: z.string().trim().max(4096).optional().describe('API key; omitted or empty retains the stored key'),
+  apiKeyConfigured: z.boolean().optional().describe('Whether an API key is configured; read only'),
+  clearApiKey: z.boolean().optional().describe('Explicitly clear the stored API key'),
+  prompt: z.string().trim().min(1).max(16_000).describe('Instructions for summarizing transcripts'),
+  protocol: z.enum(['chat-completions', 'responses']).describe('OpenAI-compatible API protocol'),
+  maxOutputTokens: z.int().min(128).max(8192).describe('Maximum output tokens per summary request'),
+  timeoutMs: z.int().min(1000).max(600_000).describe('Timeout for each summary request in milliseconds'),
+}).meta({ id: 'AdminConfigAudioSummaryDto' });
+
+const AdminConfigSpeechToTextSchema = AdminConfigMachineLearningModelSchema.extend({
+  autoTranscribe: z
+    .boolean()
+    .optional()
+    .describe('Automatically transcribe newly processed audio')
+    .meta({ visibility: User }),
+  language: z.enum(['auto', 'zh', 'en', 'yue', 'ja', 'ko']).describe('Speech language or automatic detection'),
+}).meta({ id: 'AdminConfigSpeechToTextDto' });
+
 const AdminConfigGeneratedImageSchema = z
   .object({
     format: ImageFormatSchema,
@@ -206,6 +247,9 @@ const AdminConfigSchemaWithVisibility = z
         library: AdminConfigJobSettingsSchema,
         notifications: AdminConfigJobSettingsSchema,
         ocr: AdminConfigJobSettingsSchema,
+        audioWaveform: AdminConfigJobSettingsSchema.optional(),
+        speechToText: AdminConfigJobSettingsSchema.optional(),
+        audioSummary: AdminConfigJobSettingsSchema.optional(),
         workflow: AdminConfigJobSettingsSchema,
         editor: AdminConfigJobSettingsSchema,
         integrityCheck: AdminConfigJobSettingsSchema,
@@ -229,6 +273,8 @@ const AdminConfigSchemaWithVisibility = z
           })
           .meta({ id: 'AdminConfigMachineLearningAvailabilityChecksDto' }),
         clip: AdminConfigMachineLearningModelSchema.meta({ id: 'AdminConfigClipDto' }),
+        speechToText: AdminConfigSpeechToTextSchema.optional(),
+        audioSummary: AdminConfigAudioSummarySchema.optional(),
         duplicateDetection: AdminConfigMachineLearningTaskSchema.extend({
           maxDistance: z
             .number()
@@ -460,7 +506,15 @@ const isVisible = (property: ConfigVisibility, visibility: ConfigVisibility) =>
 const getMeta = (schema: z.ZodType) =>
   (z.globalRegistry.get(schema) ?? {}) as { id?: string; description?: string; visibility?: ConfigVisibility };
 
-const unwrap = (schema: z.ZodType) => (schema instanceof z.ZodPipe ? (schema.def.in as z.ZodType) : schema);
+const unwrap = (schema: z.ZodType): z.ZodType => {
+  if (schema instanceof z.ZodPipe) {
+    return unwrap(schema.def.in as z.ZodType);
+  }
+  if (schema instanceof z.ZodOptional) {
+    return unwrap(schema.unwrap() as z.ZodType);
+  }
+  return schema;
+};
 
 const visibleSchemas = new Map<z.ZodType, Map<ConfigVisibility, z.ZodType | undefined>>();
 
@@ -480,7 +534,7 @@ const applyVisibilityRecursive = (
   override?: string,
 ): z.ZodType | undefined => {
   const object = unwrap(schema);
-  const { id, description, visibility: property } = getMeta(schema);
+  const { id, description, visibility: property } = { ...getMeta(object), ...getMeta(schema) };
 
   if (!(object instanceof z.ZodObject)) {
     return isVisible(property ?? Admin, visibility) ? schema : undefined;
@@ -511,7 +565,7 @@ const applyVisibilityRecursive = (
       schema instanceof z.ZodPipe && isComplete
         ? z.object(shape).pipe(schema.def.out as z.ZodTransform<unknown, Record<string, unknown>>)
         : z.object(shape);
-    visible = rebuilt.meta({
+    visible = (schema instanceof z.ZodOptional ? rebuilt.optional() : rebuilt).meta({
       ...(id && { id: `${visibility}${id.slice(Admin.length)}` }),
       ...((override ?? description) && { description: override ?? description }),
     });
@@ -572,7 +626,16 @@ export class ConfigTemplateStorageOptionDto extends createZodDto(ConfigTemplateS
 export { AdminConfigDto as SystemConfigDto, ConfigSmtpDto as SystemConfigSmtpDto };
 
 export function mapAdminConfig(config: SystemConfig): AdminConfigDto {
-  return config;
+  const summary = config.machineLearning.audioSummary;
+  return {
+    ...config,
+    machineLearning: {
+      ...config.machineLearning,
+      ...(summary && {
+        audioSummary: { ...summary, apiKey: '', apiKeyConfigured: !!summary.apiKey, clearApiKey: false },
+      }),
+    },
+  };
 }
 
 export function mapUserConfig(config: SystemConfig): UserConfigDto {
@@ -649,6 +712,9 @@ export const defaults = Object.freeze<SystemConfig>({
     library: { concurrency: 5 },
     notifications: { concurrency: 5 },
     ocr: { concurrency: 1 },
+    audioWaveform: { concurrency: 1 },
+    speechToText: { concurrency: 1 },
+    audioSummary: { concurrency: 1 },
     workflow: { concurrency: 5 },
     editor: { concurrency: 2 },
     integrityCheck: { concurrency: 1 },
@@ -669,6 +735,8 @@ export const defaults = Object.freeze<SystemConfig>({
       enabled: true,
       modelName: 'ViT-B-32__openai',
     },
+    speechToText: { ...speechToTextDefaults },
+    audioSummary: { ...audioSummaryDefaults },
     duplicateDetection: {
       enabled: true,
       maxDistance: 0.01,

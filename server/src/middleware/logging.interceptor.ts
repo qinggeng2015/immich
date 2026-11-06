@@ -5,7 +5,13 @@ import { LoggingRepository } from 'src/repositories/logging.repository.js';
 
 const maxArrayLength = 100;
 const replacer = (key: string, value: unknown) => {
-  if (key.toLowerCase().includes('password')) {
+  const normalizedKey = key.toLowerCase().replaceAll(/[_-]/g, '');
+  if (
+    normalizedKey.includes('password') ||
+    normalizedKey.endsWith('apikey') ||
+    normalizedKey.endsWith('clientsecret') ||
+    normalizedKey.endsWith('token')
+  ) {
     return '********';
   }
 

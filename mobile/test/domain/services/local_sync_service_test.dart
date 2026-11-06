@@ -1,8 +1,10 @@
 import 'package:drift/drift.dart' as drift;
 import 'package:drift/native.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:immich_mobile/data/db/main/database.dart';
+import 'package:immich_mobile/domain/models/album/local_album.model.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/store.model.dart';
 import 'package:immich_mobile/domain/services/local_sync.service.dart';
@@ -19,6 +21,7 @@ import '../../fixtures/asset.stub.dart';
 import '../../infrastructure/repository.mock.dart';
 import '../../repository.mocks.dart';
 import '../../service.mocks.dart';
+import '../../unit/factories/local_asset_factory.dart';
 
 void main() {
   late LocalSyncService sut;
@@ -76,6 +79,122 @@ void main() {
     await Store.put(StoreKey.manageLocalMediaAndroid, false);
     when(() => mockPermissionRepository.hasManageMediaPermission()).thenAnswer((_) async => false);
   });
+
+  test('folder rescans detect replacements even when album count and timestamp are unchanged', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = TargetPlatform.android);
+    final folder = LocalAlbum(id: 'audio-folder:one', name: 'Recordings', updatedAt: DateTime(2026), assetCount: 1);
+    registerFallbackValue(folder);
+    final oldAudio = LocalAssetFactory.create(id: 'audio-file:old').copyWith(type: .audio);
+    final newAudio = PlatformAsset(
+      id: 'audio-file:new',
+      name: 'recording.mp3',
+      type: AssetType.audio.index,
+      durationMs: 65000,
+      orientation: 0,
+      isFavorite: false,
+      playbackStyle: PlatformAssetPlaybackStyle.unknown,
+    );
+    when(() => mockNativeSyncApi.getAssetsForAlbum(folder.id)).thenAnswer((_) async => [newAudio]);
+    when(() => mockLocalAlbumRepository.getAssets(folder.id)).thenAnswer((_) async => [oldAudio]);
+    when(
+      () => mockLocalAlbumRepository.upsert(
+        any(),
+        toUpsert: any(named: 'toUpsert'),
+        toDelete: any(named: 'toDelete'),
+      ),
+    ).thenAnswer((_) async {});
+
+    await sut.updateAlbum(folder, folder);
+
+    final captured = verify(
+      () => mockLocalAlbumRepository.upsert(
+        any(),
+        toUpsert: captureAny(named: 'toUpsert'),
+        toDelete: captureAny(named: 'toDelete'),
+      ),
+    ).captured;
+    expect((captured[0] as Iterable<LocalAsset>).single.id, newAudio.id);
+    expect(captured[1], [oldAudio.id]);
+    verifyNever(() => mockNativeSyncApi.getCloudIdForAssetIds(any()));
+  });
+
+  test('revoked folder access leaves the stored assets intact', () async {
+    final folder = LocalAlbum(id: 'audio-folder:revoked', name: 'Recordings', updatedAt: DateTime(2026), assetCount: 1);
+    when(() => mockNativeSyncApi.getAssetsForAlbum(folder.id)).thenThrow(PlatformException(code: 'NO_ACCESS'));
+
+    await sut.updateAlbum(folder, folder);
+
+    verify(() => mockNativeSyncApi.getAssetsForAlbum(folder.id)).called(1);
+    verifyZeroInteractions(mockLocalAlbumRepository);
+  });
+
+  for (final selection in [BackupSelection.selected, BackupSelection.excluded]) {
+    test('Android audio retains $selection when permission is revoked and regained', () async {
+      var storedAlbum = LocalAlbum(
+        id: 'immich-audio',
+        name: 'Audio',
+        updatedAt: DateTime.fromMillisecondsSinceEpoch(1000000, isUtc: true),
+        assetCount: 1,
+        backupSelection: selection,
+      );
+      registerFallbackValue(storedAlbum);
+      final audio = LocalAssetFactory.create(id: '123').copyWith(type: .audio);
+      final platformAudio = PlatformAsset(
+        id: audio.id,
+        name: 'recording.mp3',
+        type: AssetType.audio.index,
+        durationMs: 65000,
+        orientation: 0,
+        isFavorite: false,
+        playbackStyle: PlatformAssetPlaybackStyle.unknown,
+      );
+      var deviceCount = 0;
+      final changes = <(LocalAlbum, List<LocalAsset>, List<String>)>[];
+      when(() => mockNativeSyncApi.getAlbums()).thenAnswer(
+        (_) async => [
+          PlatformAlbum(id: 'immich-audio', name: 'Audio', updatedAt: 1000, isCloud: false, assetCount: deviceCount),
+        ],
+      );
+      when(() => mockNativeSyncApi.getAssetsForAlbum('immich-audio')).thenAnswer((_) async => [platformAudio]);
+      when(() => mockNativeSyncApi.getAssetsCountSince(any(), any())).thenAnswer((_) async => 0);
+      when(() => mockNativeSyncApi.checkpointSync()).thenAnswer((_) async {});
+      when(
+        () => mockLocalAlbumRepository.getAll(sortBy: {SortLocalAlbumsBy.id}),
+      ).thenAnswer((_) async => [storedAlbum]);
+      when(() => mockLocalAlbumRepository.getAssets('immich-audio')).thenAnswer((_) async => [audio]);
+      when(
+        () => mockLocalAlbumRepository.upsert(
+          any(),
+          toUpsert: any(named: 'toUpsert'),
+          toDelete: any(named: 'toDelete'),
+        ),
+      ).thenAnswer((invocation) async {
+        storedAlbum = invocation.positionalArguments.single as LocalAlbum;
+        changes.add((
+          storedAlbum,
+          (invocation.namedArguments[#toUpsert] as Iterable<LocalAsset>).toList(),
+          (invocation.namedArguments[#toDelete] as Iterable<String>).toList(),
+        ));
+      });
+
+      await sut.fullSync();
+
+      expect(storedAlbum.assetCount, 0);
+      expect(storedAlbum.backupSelection, selection);
+      expect(changes.single.$3, [audio.id]);
+      verifyNever(() => mockLocalAlbumRepository.deleteAlbum(any()));
+
+      deviceCount = 1;
+      await sut.fullSync();
+
+      expect(storedAlbum.assetCount, 1);
+      expect(storedAlbum.backupSelection, selection);
+      expect(changes.last.$2.single.id, audio.id);
+      verify(() => mockNativeSyncApi.checkpointSync()).called(2);
+      verifyNever(() => mockLocalAlbumRepository.deleteAlbum(any()));
+    });
+  }
 
   group('LocalSyncService - syncTrashedAssets gating', () {
     test('invokes syncTrashedAssets when Android flag enabled and permission granted', () async {

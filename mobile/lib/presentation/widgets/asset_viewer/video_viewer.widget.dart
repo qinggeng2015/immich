@@ -7,6 +7,7 @@ import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/store.model.dart';
 import 'package:immich_mobile/entities/store.entity.dart';
 import 'package:immich_mobile/extensions/platform_extensions.dart';
+import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/providers/asset_viewer/asset_viewer.provider.dart';
 import 'package:immich_mobile/providers/asset_viewer/is_motion_video_playing.provider.dart';
 import 'package:immich_mobile/providers/asset_viewer/video_player_provider.dart';
@@ -26,6 +27,7 @@ class NativeVideoViewer extends ConsumerStatefulWidget {
 
   /// Overrides the user's configured loop video setting
   final bool? loopOverride;
+  final bool? autoPlayOverride;
 
   const NativeVideoViewer({
     super.key,
@@ -34,6 +36,7 @@ class NativeVideoViewer extends ConsumerStatefulWidget {
     required this.image,
     this.isCurrent = false,
     this.loopOverride,
+    this.autoPlayOverride,
   });
 
   @override
@@ -44,10 +47,13 @@ class NativeVideoViewerState extends ConsumerState<NativeVideoViewer> with Widge
   static final _log = Logger('NativeVideoViewer');
 
   NativeVideoPlayerController? _controller;
+  final _stagedFiles = <File>[];
   @visibleForTesting
   late final Future<VideoSource?> videoSource;
   Timer? _loadTimer;
   bool _isVideoReady = false;
+  bool _hasAudioError = false;
+  bool _hasTriedRemoteAudio = false;
   bool _shouldPlayOnForeground = true;
 
   VideoPlayerNotifier get _notifier => ref.read(videoPlayerProvider(widget.asset.id).notifier);
@@ -56,6 +62,7 @@ class NativeVideoViewerState extends ConsumerState<NativeVideoViewer> with Widge
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _shouldPlayOnForeground = !widget.asset.isAudio;
     videoSource = _createSource();
   }
 
@@ -82,18 +89,29 @@ class NativeVideoViewerState extends ConsumerState<NativeVideoViewer> with Widge
     WidgetsBinding.instance.removeObserver(this);
     _loadTimer?.cancel();
     _removeListeners();
+    for (final file in _stagedFiles) {
+      unawaited(_deleteStagedFile(file));
+    }
     super.dispose();
+  }
+
+  Future<void> _deleteStagedFile(File file) async {
+    try {
+      await file.delete();
+    } catch (error, stackTrace) {
+      _log.warning('Cannot remove staged playback file', error, stackTrace);
+    }
   }
 
   @override
   Future<void> didChangeAppLifecycleState(AppLifecycleState state) async {
     switch (state) {
       case AppLifecycleState.resumed:
-        if (_shouldPlayOnForeground) {
+        if (_shouldPlayOnForeground && widget.isCurrent) {
           await _notifier.play();
         }
       case AppLifecycleState.paused:
-        _shouldPlayOnForeground = await _controller?.isPlaying() ?? true;
+        _shouldPlayOnForeground = await _controller?.isPlaying() ?? !widget.asset.isAudio;
         if (_shouldPlayOnForeground && mounted) {
           await _notifier.pause();
         }
@@ -135,6 +153,13 @@ class NativeVideoViewerState extends ConsumerState<NativeVideoViewer> with Widge
             ? await storageRepository.getMotionFileForAsset(localAsset)
             : await storageRepository.getFileForAsset(localAsset.id);
 
+        if (file != null && (localAsset.id.startsWith('saf-file:') || localAsset.id.startsWith('audio-file:'))) {
+          if (!mounted) {
+            await _deleteStagedFile(file);
+            return null;
+          }
+          _stagedFiles.add(file);
+        }
         if (!mounted) {
           return null;
         }
@@ -161,7 +186,7 @@ class NativeVideoViewerState extends ConsumerState<NativeVideoViewer> with Widge
         return null;
       }
 
-      final isOriginalVideo = ref.read(appConfigProvider).viewer.loadOriginalVideo;
+      final isOriginalVideo = !videoAsset.isAudio && ref.read(appConfigProvider).viewer.loadOriginalVideo;
       final String postfixUrl = isOriginalVideo ? 'original' : 'video/playback';
       final String assetId = remoteAsset.livePhotoVideoId ?? remoteAsset.id;
       final String videoUrl = '$serverEndpoint/assets/$assetId/$postfixUrl';
@@ -228,14 +253,18 @@ class NativeVideoViewerState extends ConsumerState<NativeVideoViewer> with Widge
       return;
     }
 
-    setState(() => _isVideoReady = true);
+    setState(() {
+      _isVideoReady = true;
+      _hasAudioError = false;
+    });
 
-    if (ref.read(assetViewerProvider).showingDetails) {
+    if (widget.autoPlayOverride == null && ref.read(assetViewerProvider).showingDetails) {
       return;
     }
 
-    final autoPlayVideo = ref.read(appConfigProvider).viewer.autoPlayVideo;
-    if (autoPlayVideo || widget.asset.isMotionPhoto) {
+    final autoPlayVideo =
+        widget.autoPlayOverride ?? (!widget.asset.isAudio && ref.read(appConfigProvider).viewer.autoPlayVideo);
+    if (autoPlayVideo || widget.asset.isMotionPhoto || (widget.asset.isAudio && _notifier.playRequested)) {
       await _notifier.play();
     }
   }
@@ -266,7 +295,52 @@ class NativeVideoViewerState extends ConsumerState<NativeVideoViewer> with Widge
     _notifier.onNativeStatusChanged();
   }
 
+  void _onPlaybackError() {
+    if (!mounted || !widget.asset.isAudio || _controller?.onError.value == null) {
+      return;
+    }
+    final remoteId = widget.asset.remoteId;
+    if (remoteId != null && _controller?.videoSource?.type != VideoSourceType.network && !_hasTriedRemoteAudio) {
+      _hasTriedRemoteAudio = true;
+      unawaited(_retryRemoteAudio(remoteId));
+      return;
+    }
+    unawaited(_notifier.pause());
+    setState(() => _hasAudioError = true);
+  }
+
+  Future<void> _retryRemoteAudio(String remoteId) async {
+    if (!mounted) {
+      return;
+    }
+    await _notifier.pauseForReload();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _hasAudioError = false;
+      _isVideoReady = false;
+    });
+    try {
+      final endpoint = Store.get(StoreKey.serverEndpoint);
+      final source = await VideoSource.init(
+        path: '$endpoint/assets/$remoteId/video/playback',
+        type: VideoSourceType.network,
+        headers: ApiService.getRequestHeaders(),
+      );
+      if (mounted) {
+        await _notifier.load(source);
+      }
+    } catch (error) {
+      _log.warning('Error loading the remote audio copy', error);
+      if (mounted) {
+        setState(() => _hasAudioError = true);
+      }
+    }
+  }
+
   void _removeListeners() {
+    _controller?.onError.removeListener(_onPlaybackError);
     _controller?.onPlaybackPositionChanged.removeListener(_onPlaybackPositionChanged);
     _controller?.onPlaybackStatusChanged.removeListener(_onPlaybackStatusChanged);
     _controller?.onPlaybackReady.removeListener(_onPlaybackReady);
@@ -275,12 +349,24 @@ class NativeVideoViewerState extends ConsumerState<NativeVideoViewer> with Widge
 
   Future<void> _loadVideo() async {
     final nc = _controller;
-    if (nc == null || nc.videoSource != null || !mounted) {
+    if (nc == null || !mounted) {
+      return;
+    }
+    if (nc.videoSource != null) {
+      if (widget.asset.isAudio && widget.autoPlayOverride == true && widget.isCurrent) {
+        await _notifier.play();
+      }
       return;
     }
 
     final source = await videoSource;
-    if (source == null || !mounted) {
+    if (!mounted) {
+      return;
+    }
+    if (source == null) {
+      if (widget.asset.isAudio) {
+        setState(() => _hasAudioError = true);
+      }
       return;
     }
 
@@ -289,7 +375,10 @@ class NativeVideoViewerState extends ConsumerState<NativeVideoViewer> with Widge
     final localNotifier = _notifier;
 
     await localNotifier.load(source);
-    await localNotifier.setLoop(!widget.asset.isMotionPhoto && loopVideo);
+    await localNotifier.setLoop(!widget.asset.isMotionPhoto && !widget.asset.isAudio && loopVideo);
+    if (widget.asset.isAudio && nc.videoSource == null && mounted) {
+      setState(() => _hasAudioError = true);
+    }
     await localNotifier.setVolume(1);
   }
 
@@ -300,6 +389,7 @@ class NativeVideoViewerState extends ConsumerState<NativeVideoViewer> with Widge
 
     _notifier.attachController(nc);
 
+    nc.onError.addListener(_onPlaybackError);
     nc.onPlaybackPositionChanged.addListener(_onPlaybackPositionChanged);
     nc.onPlaybackStatusChanged.addListener(_onPlaybackStatusChanged);
     nc.onPlaybackReady.addListener(_onPlaybackReady);
@@ -323,22 +413,39 @@ class NativeVideoViewerState extends ConsumerState<NativeVideoViewer> with Widge
     final showPlayer = !isCasting && isRouteActive;
 
     return IgnorePointer(
+      ignoring: !widget.asset.isAudio,
       child: Stack(
         children: [
-          if (!_isVideoReady || widget.asset.isMotionPhoto || !showPlayer) Positioned.fill(child: widget.image),
-          if (showPlayer) ...[
+          if (!widget.asset.isAudio && (!_isVideoReady || widget.asset.isMotionPhoto || !showPlayer))
+            Positioned.fill(child: widget.image),
+          if (showPlayer)
             Visibility.maintain(
-              visible: _isVideoReady,
+              visible: _isVideoReady && !widget.asset.isAudio,
               child: NativeVideoPlayerView(onViewReady: _initController),
             ),
-            Center(
-              child: AnimatedOpacity(
-                opacity: status == VideoPlaybackStatus.buffering ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 400),
-                child: const CircularProgressIndicator(),
+          if (widget.asset.isAudio) Positioned.fill(child: widget.image),
+          if (showPlayer)
+            IgnorePointer(
+              child: Center(
+                child: AnimatedOpacity(
+                  opacity: !_hasAudioError && status == VideoPlaybackStatus.buffering ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 400),
+                  child: const CircularProgressIndicator(),
+                ),
               ),
             ),
-          ],
+          if (_hasAudioError)
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  context.t.audio_playback_failed,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+            ),
         ],
       ),
     );

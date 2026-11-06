@@ -14,6 +14,7 @@ import 'package:immich_mobile/extensions/scroll_extensions.dart';
 import 'package:immich_mobile/presentation/widgets/asset_viewer/asset_details.widget.dart';
 import 'package:immich_mobile/presentation/widgets/asset_viewer/asset_stack.provider.dart';
 import 'package:immich_mobile/presentation/widgets/asset_viewer/asset_stack.widget.dart';
+import 'package:immich_mobile/presentation/widgets/asset_viewer/audio_cover.widget.dart';
 import 'package:immich_mobile/presentation/widgets/asset_viewer/ocr_overlay.widget.dart';
 import 'package:immich_mobile/presentation/widgets/asset_viewer/video_viewer.widget.dart';
 import 'package:immich_mobile/presentation/widgets/images/image_provider.dart';
@@ -21,6 +22,7 @@ import 'package:immich_mobile/presentation/widgets/images/progressive_image.widg
 import 'package:immich_mobile/presentation/widgets/images/thumbnail.widget.dart';
 import 'package:immich_mobile/providers/asset_viewer/asset_viewer.provider.dart';
 import 'package:immich_mobile/providers/asset_viewer/is_motion_video_playing.provider.dart';
+import 'package:immich_mobile/providers/asset_viewer/video_player_provider.dart';
 import 'package:immich_mobile/providers/infrastructure/settings.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
 import 'package:immich_mobile/providers/view_intent/view_intent_file_path.provider.dart';
@@ -338,11 +340,11 @@ class _AssetPageState extends ConsumerState<AssetPage> {
       return sb.childSize.height * sb.initialScale;
     }
 
-    if (asset == null || asset.width == null || asset.height == null) {
+    if (asset == null || asset.isAudio || !asset.hasDimensions) {
       return maxHeight;
     }
 
-    final r = asset.width! / asset.height!;
+    final r = asset.aspectRatio;
     return math.min(maxWidth / r, maxHeight);
   }
 
@@ -360,16 +362,18 @@ class _AssetPageState extends ConsumerState<AssetPage> {
     required Size? remoteThumbnailSize,
   }) {
     final size = context.sizeData;
-    final imageProvider = getFullImageProvider(
-      asset,
-      size: size,
-      localFilePath: localFilePath,
-      remoteThumbnailSize: remoteThumbnailSize,
-    );
+    final imageProvider = asset.isAudio
+        ? null
+        : getFullImageProvider(
+            asset,
+            size: size,
+            localFilePath: localFilePath,
+            remoteThumbnailSize: remoteThumbnailSize,
+          );
 
     if (asset.isImage && !isPlayingMotionVideo) {
       return ProgressiveImage(
-        provider: imageProvider,
+        provider: imageProvider!,
         builder: (context, provider) => PhotoView(
           key: Key(asset.heroTag),
           index: widget.index,
@@ -401,7 +405,9 @@ class _AssetPageState extends ConsumerState<AssetPage> {
 
     return PhotoView.customChild(
       key: Key(asset.heroTag),
-      childSize: asset.width != null && asset.height != null
+      childSize: asset.isAudio
+          ? size
+          : asset.width != null && asset.height != null
           ? Size(asset.width!.toDouble(), asset.height!.toDouble())
           : null,
       onDragStart: _onDragStart,
@@ -413,7 +419,7 @@ class _AssetPageState extends ConsumerState<AssetPage> {
       heroAttributes: heroAttributes,
       filterQuality: FilterQuality.high,
       basePosition: Alignment.center,
-      disableScaleGestures: _showingDetails,
+      disableScaleGestures: _showingDetails || asset.isAudio,
       minScale: PhotoViewComputedScale.contained,
       maxScale: _maxImagePixelSize,
       initialScale: PhotoViewComputedScale.contained,
@@ -425,7 +431,20 @@ class _AssetPageState extends ConsumerState<AssetPage> {
         asset: asset,
         localFilePath: localFilePath,
         isCurrent: isCurrent,
-        image: Image(image: imageProvider, fit: BoxFit.contain, alignment: Alignment.center),
+        image: asset.isAudio
+            ? AudioCover(
+                asset: asset,
+                showName: true,
+                durationOverride: ref.watch(videoPlayerProvider(asset.id).select((state) => state.duration)),
+                onPressed: isCurrent ? () => ref.read(videoPlayerProvider(asset.id).notifier).toggle() : null,
+                isPlaying: ref.watch(
+                  videoPlayerProvider(asset.id).select(
+                    (state) =>
+                        state.status == VideoPlaybackStatus.playing || state.status == VideoPlaybackStatus.buffering,
+                  ),
+                ),
+              )
+            : Image(image: imageProvider!, fit: BoxFit.contain, alignment: Alignment.center),
       ),
     );
   }

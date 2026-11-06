@@ -1,0 +1,147 @@
+name: Publish Immich Audio
+
+on:
+  push:
+    tags: ['audio-*']
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: Optional Android base version code, at least 3040001
+        required: false
+        type: string
+
+concurrency:
+  group: audio-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  prepare:
+    if: github.repository == 'qinggeng2015/immich'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      tag: ${{ steps.prepare.outputs.tag }}
+      build-number: ${{ steps.prepare.outputs.build-number }}
+      needs-checks: ${{ steps.prepare.outputs.needs-checks }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca
+        with:
+          version: 2026.10.5
+          install_args: --locked node
+          github_token: ${{ github.token }}
+      - name: Verify tag and previous checks
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_BUILD_NUMBER: ${{ inputs.build_number }}
+        run: mise //.github:release:prepare
+
+  checks:
+    needs: prepare
+    if: needs.prepare.outputs.needs-checks == 'true'
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/fork-checks.yml
+    with:
+      ref: ${{ github.sha }}
+
+  android:
+    needs: prepare
+    permissions:
+      contents: read
+    uses: ./.github/workflows/fork-android.yml
+    with:
+      ref: ${{ github.sha }}
+      build_number: ${{ needs.prepare.outputs.build-number }}
+    secrets:
+      AUDIO_ANDROID_KEYSTORE_BASE64: ${{ secrets.AUDIO_ANDROID_KEYSTORE_BASE64 }}
+
+  containers:
+    needs: [prepare, checks]
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && (needs.checks.result == 'success' || needs.checks.result == 'skipped') }}
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+    uses: ./.github/workflows/fork-containers.yml
+    with:
+      ref: ${{ github.sha }}
+      tag: ${{ needs.prepare.outputs.tag }}
+
+  packages:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      RELEASE_SHA: ${{ github.sha }}
+      RELEASE_REPOSITORY: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca
+        with:
+          version: 2026.10.5
+          install_args: --locked node pnpm
+          github_token: ${{ github.token }}
+      - name: Build downloadable SDK, CLI and deployment files
+        run: mise //.github:release:packages
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: audio-release-packages
+          path: .scratch/fork-release/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  publish:
+    needs: [prepare, checks, android, containers, packages]
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && (needs.checks.result == 'success' || needs.checks.result == 'skipped') && needs.android.result == 'success' && needs.containers.result == 'success' && needs.packages.result == 'success' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+      packages: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      RELEASE_SHA: ${{ github.sha }}
+      RELEASE_REPOSITORY: ${{ github.repository }}
+      RELEASE_BUILD_NUMBER: ${{ needs.prepare.outputs.build-number }}
+      RELEASE_SERVER_IMAGE: ${{ needs.containers.outputs.server-image }}
+      RELEASE_ML_IMAGE: ${{ needs.containers.outputs.machine-learning-image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca
+        with:
+          version: 2026.10.5
+          install_args: --locked node
+          github_token: ${{ github.token }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          pattern: audio-*
+          path: .scratch/fork-release/
+          merge-multiple: true
+      - name: Authenticate container manifest inspection
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ github.token }}
+      - name: Verify release assets and record container digests
+        run: mise //.github:release:manifest
+      - name: Publish the complete release
+        run: mise //.github:release:publish

@@ -558,13 +558,17 @@ describe(LibraryService.name, () => {
       } as Stats);
     });
 
-    it('should import a new asset', async () => {
+    it.each([
+      ['photo.jpg', AssetType.Image],
+      ['video.mp4', AssetType.Video],
+      ['recording.mp3', AssetType.Audio],
+    ])('should import %s with the correct asset type', async (filename, type) => {
       const library = factory.library();
       const asset = AssetFactory.create();
 
       const mockLibraryJob: ILibraryFileJob = {
         libraryId: library.id,
-        paths: ['/data/user1/photo.jpg'],
+        paths: [`/data/user1/${filename}`],
       };
 
       mocks.asset.createAll.mockResolvedValue([asset.id]);
@@ -576,9 +580,9 @@ describe(LibraryService.name, () => {
         expect.objectContaining({
           ownerId: library.ownerId,
           libraryId: library.id,
-          originalPath: '/data/user1/photo.jpg',
-          type: AssetType.Image,
-          originalFileName: 'photo.jpg',
+          originalPath: `/data/user1/${filename}`,
+          type,
+          originalFileName: filename,
           isExternal: true,
         }),
       ]);

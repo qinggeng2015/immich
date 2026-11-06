@@ -20,7 +20,7 @@
 
   let showClearIcon = $derived(searchManager.filter.query.length > 0);
   let placeholder = $derived(
-    searchStore.isSearchEnabled ? getSearchTypePlaceholder(searchManager.filter.queryType) : $t('search_your_photos'),
+    searchStore.isSearchEnabled ? getSearchTypePlaceholder(searchManager.queryType) : $t('search_your_photos'),
   );
 
   let input = $state<HTMLInputElement>();

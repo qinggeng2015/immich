@@ -19,11 +19,15 @@ class SlideshowProgressBar extends ConsumerWidget {
       return AnimatedBuilder(animation: progress, builder: (context, _) => _bar(context, progress.value));
     }
 
-    final position = ref.watch(videoPlayerProvider(asset.id).select((s) => s.position));
-    return _bar(context, position.inMilliseconds / asset.duration.inMilliseconds);
+    final state = ref.watch(videoPlayerProvider(asset.id));
+    final duration = state.duration > Duration.zero ? state.duration : asset.duration;
+    if (duration <= Duration.zero) {
+      return _bar(context, null);
+    }
+    return _bar(context, (state.position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0));
   }
 
-  Widget _bar(BuildContext context, double value) {
+  Widget _bar(BuildContext context, double? value) {
     return LinearProgressIndicator(
       color: context.colorScheme.primary,
       borderRadius: BorderRadius.zero,

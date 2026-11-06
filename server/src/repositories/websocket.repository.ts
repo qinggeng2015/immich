@@ -14,6 +14,7 @@ import { ReleaseEventV1, ServerVersionResponseDto } from 'src/dtos/server.dto.js
 import { SyncAssetEditV1, SyncAssetExifV1, SyncAssetV2 } from 'src/dtos/sync.dto.js';
 import { type AppRestartEvent, type ArgsOf, EventRepository } from 'src/repositories/event.repository.js';
 import { LoggingRepository } from 'src/repositories/logging.repository.js';
+import { CLIENT_FEATURES_HEADER, hasAudioAsset, supportsAudio } from 'src/utils/client-features.js';
 import { handlePromiseError } from 'src/utils/misc.js';
 
 export const serverEvents = [
@@ -55,6 +56,14 @@ export interface ClientEventMap {
 
 export type AuthFn = (client: Socket) => Promise<AuthDto>;
 
+const audioRoom = (room: string) => `feature:audio:${room}`;
+const assetEvents = new Set<keyof ClientEventMap>([
+  'on_upload_success',
+  'on_asset_update',
+  'AssetUploadReadyV2',
+  'AssetEditReadyV2',
+]);
+
 @WebSocketGateway({
   cors: true,
   path: '/api/socket.io',
@@ -90,8 +99,17 @@ export class WebsocketRepository implements OnGatewayConnection, OnGatewayDiscon
       this.logger.log(`Websocket Connect:    ${client.id}`);
       const auth = await this.authenticate(client);
       await client.join(auth.user.id);
+      const audioSupported =
+        supportsAudio(client.request.headers[CLIENT_FEATURES_HEADER]) || supportsAudio(client.handshake.auth?.features);
+      if (audioSupported) {
+        await client.join(audioRoom('all'));
+        await client.join(audioRoom(auth.user.id));
+      }
       if (auth.session) {
         await client.join(auth.session.id);
+        if (audioSupported) {
+          await client.join(audioRoom(auth.session.id));
+        }
       }
       await this.eventRepository.emit('WebsocketConnect', { userId: auth.user.id });
     } catch (error: Error | any) {
@@ -107,10 +125,15 @@ export class WebsocketRepository implements OnGatewayConnection, OnGatewayDiscon
   }
 
   clientSend<T extends keyof ClientEventMap>(event: T, room: string, ...data: ClientEventMap[T]) {
-    this.server?.to(room).emit(event, ...data);
+    this.server?.to(assetEvents.has(event) && hasAudioAsset(data) ? audioRoom(room) : room).emit(event, ...data);
   }
 
   clientBroadcast<T extends keyof ClientEventMap>(event: T, ...data: ClientEventMap[T]) {
+    if (assetEvents.has(event) && hasAudioAsset(data)) {
+      this.server?.to(audioRoom('all')).emit(event, ...data);
+      return;
+    }
+
     this.server?.emit(event, ...data);
   }
 

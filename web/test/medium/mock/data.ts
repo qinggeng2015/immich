@@ -408,6 +408,7 @@ export class MockData {
       isFavorite: bucket.map((asset) => asset.isFavorite),
       isTrashed: bucket.map((asset) => asset.isTrashed),
       isImage: bucket.map((asset) => asset.type === AssetTypeEnum.Image),
+      isAudio: bucket.map((asset) => asset.type === AssetTypeEnum.Audio),
       duration: bucket.map((asset) => asset.duration),
       projectionType: bucket.map((asset) => asset.exifInfo?.projectionType ?? null),
       livePhotoVideoId: bucket.map((asset) => asset.livePhotoVideoId ?? null),

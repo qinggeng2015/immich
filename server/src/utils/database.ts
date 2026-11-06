@@ -529,6 +529,16 @@ export function searchAssetBuilderLegacy(kysely: Kysely<DB>, options: AssetSearc
         .innerJoin('ocr_search', 'asset.id', 'ocr_search.assetId')
         .where(() => sql`f_unaccent(ocr_search.text) %>> f_unaccent(${tokenizeForSearch(options.ocr!).join(' ')})`),
     )
+    .$if(!!options.transcript, (qb) =>
+      qb
+        .innerJoin('asset_audio_analysis', 'asset.id', 'asset_audio_analysis.assetId')
+        .whereRef('asset_audio_analysis.transcriptChecksum', '=', 'asset.checksum')
+        .whereRef('asset_audio_analysis.transcriptSourceModifiedAt', '=', 'asset.fileModifiedAt')
+        .where(
+          () =>
+            sql`f_unaccent(asset_audio_analysis."transcriptText") %>> f_unaccent(${tokenizeForSearch(options.transcript!).join(' ')})`,
+        ),
+    )
     .$if(!!options.type, (qb) => qb.where('asset.type', '=', options.type!))
     .$if(options.isFavorite !== undefined, (qb) => qb.where('asset.isFavorite', '=', options.isFavorite!))
     .$if(options.isOffline !== undefined, (qb) => qb.where('asset.isOffline', '=', options.isOffline!))
@@ -776,6 +786,20 @@ function branchPredicates(eb: AssetExpressionBuilder, branch: SearchFilterBranch
               .whereRef('ocr_search.assetId', '=', 'asset.id')
               .where(
                 sql<SqlBool>`f_unaccent(ocr_search.text) %>> f_unaccent(${tokenizeForSearch(branch.ocr.matches).join(' ')})`,
+              ),
+          ),
+        ]
+      : []),
+    ...(branch.transcript
+      ? [
+          eb.exists(
+            eb
+              .selectFrom('asset_audio_analysis')
+              .whereRef('asset_audio_analysis.assetId', '=', 'asset.id')
+              .whereRef('asset_audio_analysis.transcriptChecksum', '=', 'asset.checksum')
+              .whereRef('asset_audio_analysis.transcriptSourceModifiedAt', '=', 'asset.fileModifiedAt')
+              .where(
+                sql<SqlBool>`f_unaccent(asset_audio_analysis."transcriptText") %>> f_unaccent(${tokenizeForSearch(branch.transcript.matches).join(' ')})`,
               ),
           ),
         ]

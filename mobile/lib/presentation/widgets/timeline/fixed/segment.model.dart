@@ -148,7 +148,7 @@ class _FixedSegmentRow extends ConsumerWidget {
     final widths = List.filled(assets.length, tileHeight);
 
     if (isDynamicLayout) {
-      final aspectRatios = assets.map((e) => (e.width ?? 1) / (e.height ?? 1)).toList();
+      final aspectRatios = assets.map((e) => e.aspectRatio).toList();
       final meanAspectRatio = aspectRatios.sum / assets.length;
 
       // 1: mean width

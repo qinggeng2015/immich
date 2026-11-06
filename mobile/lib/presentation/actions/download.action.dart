@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -12,7 +13,7 @@ import 'package:immich_mobile/utils/error_handler.dart';
 
 final _stateProvider = Provider.family.autoDispose<List<RemoteAsset>?, ActionSource>((ref, source) {
   final assets = ref.watch(assetsActionProvider(source));
-  final remote = assets.remote().toList(growable: false);
+  final remote = assets.remote().where((asset) => !asset.isAudio || Platform.isAndroid).toList(growable: false);
   return remote.isEmpty ? null : remote;
 }, dependencies: [assetsActionProvider]);
 

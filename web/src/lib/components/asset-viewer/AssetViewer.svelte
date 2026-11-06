@@ -5,6 +5,7 @@
   import type { Action, OnAction, PreAction } from '#lib/components/asset-viewer/actions/action.ts';
   import NextAssetAction from '#lib/components/asset-viewer/actions/NextAssetAction.svelte';
   import PreviousAssetAction from '#lib/components/asset-viewer/actions/PreviousAssetAction.svelte';
+  import AudioViewer from '#lib/components/asset-viewer/AudioViewer.svelte';
   import AssetViewerNavBar from '#lib/components/asset-viewer/AssetViewerNavBar.svelte';
   import { preloadManager } from '#lib/components/asset-viewer/PreloadManager.svelte.ts';
   import OnEvents from '#lib/components/OnEvents.svelte';
@@ -396,7 +397,7 @@
     await refreshStack();
     ocrManager.clear();
     faceManager.clear();
-    if (!sharedLink) {
+    if (!sharedLink && asset.type !== AssetTypeEnum.Audio) {
       if (previewStackedAsset) {
         await ocrManager.getAssetOcr(previewStackedAsset.id);
         await faceManager.getAssetFaces(previewStackedAsset.id);
@@ -428,6 +429,9 @@
   });
 
   const viewerKind = $derived.by(() => {
+    if (asset.type === AssetTypeEnum.Audio) {
+      return 'AudioViewer';
+    }
     if (previewStackedAsset) {
       return previewStackedAsset.type === AssetTypeEnum.Image ? 'PhotoViewer' : 'StackVideoViewer';
     }
@@ -550,7 +554,16 @@
 
   <!-- Asset Viewer -->
   <div data-viewer-content class="relative z-[-1] col-span-4 col-start-1 row-span-full row-start-1">
-    {#if viewerKind === 'StackVideoViewer'}
+    {#if viewerKind === 'AudioViewer'}
+      {#key asset.id}
+        <AudioViewer
+          {asset}
+          autoplay={$slideshowState === SlideshowState.PlaySlideshow}
+          onStarted={handleVideoStarted}
+          onEnded={() => navigateAsset()}
+        />
+      {/key}
+    {:else if viewerKind === 'StackVideoViewer'}
       <VideoViewer
         asset={previewStackedAsset!}
         cacheKey={previewStackedAsset!.thumbhash}

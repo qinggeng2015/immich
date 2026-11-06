@@ -97,6 +97,7 @@ export interface SearchEmbeddingOptions {
 
 export interface SearchOcrOptions {
   ocr?: string;
+  transcript?: string;
 }
 
 export interface SearchPeopleOptions {

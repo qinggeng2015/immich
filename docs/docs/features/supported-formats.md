@@ -1,6 +1,6 @@
 # Supported Media Formats
 
-Immich supports a number of image and video formats, the most common of which are outlined here.
+Immich supports a number of image, video, and audio formats, the most common of which are outlined here.
 
 :::note
 For the full list, refer to the [Immich source code](https://github.com/immich-app/immich/blob/main/server/src/utils/mime-types.ts).
@@ -43,3 +43,15 @@ For the full list, refer to the [Immich source code](https://github.com/immich-a
 | `QUICKTIME` | `.mov`                      | :white_check_mark: |       |
 | `WEBM`      | `.webm`                     | :white_check_mark: |       |
 | `WMV`       | `.wmv`                      | :white_check_mark: |       |
+
+## Audio formats
+
+This fork supports `.aac`, `.aif`, `.aiff`, `.alac`, `.amr`, `.caf`, `.flac`, `.m4a`, `.m4b`, `.mp3`, `.oga`, `.ogg`, `.opus`, `.wav`, and `.wma`.
+
+Original files are preserved for downloading. The server creates an AAC audio stream in an MP4 container for playback across the web and mobile apps. Playback may require processing to finish first. Audio thumbnails display a play icon and duration. Audio is excluded from face recognition, OCR, visual search, and visual duplicate detection.
+
+To find audio by name, select the audio media type and use filename search. Description and other metadata filters can also narrow the results. On Android, downloaded audio is saved in `Music/Immich`. On iOS, use the sharing menu to save audio to Files.
+
+Audio also supports [waveform playback and speech transcription](/features/audio-analysis), with separate background queues and transcript search.
+
+Audio uploads require a server that advertises audio support. Updated clients connected to older servers continue backing up images and videos and skip audio. Older clients connected to this fork receive compatible asset types; their timeline excludes audio.

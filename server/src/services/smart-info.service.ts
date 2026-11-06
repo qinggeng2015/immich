@@ -4,7 +4,7 @@ import type { JobOf } from 'src/types.js';
 import { OnEvent, OnJob } from 'src/decorators.js';
 import { SystemConfig } from 'src/dtos/config.dto.js';
 
-import { AssetVisibility, DatabaseLock, ImmichWorker, JobName, JobStatus, QueueName } from 'src/enum.js';
+import { AssetType, AssetVisibility, DatabaseLock, ImmichWorker, JobName, JobStatus, QueueName } from 'src/enum.js';
 import { BaseService } from 'src/services/base.service.js';
 import { batched, getCLIPModelInfo, isSmartSearchEnabled } from 'src/utils/misc.js';
 
@@ -92,6 +92,10 @@ export class SmartInfoService extends BaseService {
     }
 
     const asset = await this.assetJobRepository.getForClipEncoding(id);
+    if (asset?.type === AssetType.Audio) {
+      return JobStatus.Skipped;
+    }
+
     const previewFile = asset?.files.find((file) => file.isEdited) ?? asset?.files[0];
     if (!asset || !previewFile) {
       return JobStatus.Failed;

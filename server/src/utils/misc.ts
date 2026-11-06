@@ -14,7 +14,7 @@ import path from 'node:path';
 import picomatch from 'picomatch';
 import { CLIP_MODEL_INFO, JOBS_ASSET_PAGINATION_SIZE, endpointTags, serverVersion } from 'src/constants.js';
 import { extraModels } from 'src/decorators.js';
-import { SystemConfig } from 'src/dtos/config.dto.js';
+import { SystemConfig, audioSummaryDefaults, speechToTextDefaults } from 'src/dtos/config.dto.js';
 import { ApiCustomExtension, ImmichCookie, ImmichHeader, MetadataKey } from 'src/enum.js';
 import { LoggingRepository } from 'src/repositories/logging.repository.js';
 
@@ -96,6 +96,19 @@ export const isSmartSearchEnabled = (machineLearning: SystemConfig['machineLearn
   isMachineLearningEnabled(machineLearning) && machineLearning.clip.enabled;
 export const isOcrEnabled = (machineLearning: SystemConfig['machineLearning']) =>
   isMachineLearningEnabled(machineLearning) && machineLearning.ocr.enabled;
+export const getSpeechToTextConfig = (machineLearning: SystemConfig['machineLearning']) => ({
+  ...speechToTextDefaults,
+  ...machineLearning.speechToText,
+});
+export const isSpeechToTextEnabled = (machineLearning: SystemConfig['machineLearning']) =>
+  isMachineLearningEnabled(machineLearning) && getSpeechToTextConfig(machineLearning).enabled;
+export const getAudioSummaryConfig = (machineLearning: SystemConfig['machineLearning']) => ({
+  ...audioSummaryDefaults,
+  ...machineLearning.audioSummary,
+  apiKey: machineLearning.audioSummary?.apiKey ?? audioSummaryDefaults.apiKey,
+});
+export const isAudioSummaryEnabled = (machineLearning: SystemConfig['machineLearning']) =>
+  isMachineLearningEnabled(machineLearning) && getAudioSummaryConfig(machineLearning).enabled;
 export const isFacialRecognitionEnabled = (machineLearning: SystemConfig['machineLearning']) =>
   isMachineLearningEnabled(machineLearning) && machineLearning.facialRecognition.enabled;
 export const isDuplicateDetectionEnabled = (machineLearning: SystemConfig['machineLearning']) =>

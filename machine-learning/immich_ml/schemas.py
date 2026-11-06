@@ -1,7 +1,7 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from enum import Enum
-from typing import Annotated, Any, Protocol, TypeAlias
+from typing import Annotated, Any, Literal, Protocol, TypeAlias
 
 import numpy as np
 import numpy.typing as npt
@@ -24,6 +24,7 @@ class ModelTask(StrEnum):
     FACIAL_RECOGNITION = "facial-recognition"
     SEARCH = "clip"
     OCR = "ocr"
+    SPEECH_TO_TEXT = "speech-to-text"
 
 
 class ModelType(StrEnum):
@@ -31,6 +32,7 @@ class ModelType(StrEnum):
     RECOGNITION = "recognition"
     TEXTUAL = "textual"
     VISUAL = "visual"
+    TRANSCRIPTION = "transcription"
 
 
 class ModelFormat(StrEnum):
@@ -44,6 +46,7 @@ class ModelSource(StrEnum):
     MCLIP = "mclip"
     OPENCLIP = "openclip"
     PADDLE = "paddle"
+    SENSEVOICE = "sensevoice"
 
 
 class ModelOrganization(StrEnum):
@@ -155,6 +158,28 @@ class TextDetectionOptions(Options):
 @dataclass(frozen=True)
 class TextRecognitionOptions(Options):
     min_score: Annotated[float, Field(alias="minScore")] = 0.9
+
+
+@dataclass(frozen=True)
+class SpeechTranscriptionOptions(Options):
+    language: Literal["auto", "zh", "en", "yue", "ja", "ko"] = "auto"
+
+
+@dataclass(frozen=True)
+class AudioInput:
+    samples: npt.NDArray[np.float32]
+
+
+class TranscriptionSegment(TypedDict):
+    startMs: int
+    endMs: int
+    text: str
+
+
+class TranscriptionOutput(TypedDict):
+    text: str
+    language: str | None
+    segments: list[TranscriptionSegment]
 
 
 InferenceResponse = dict[str, Any]

@@ -340,6 +340,12 @@ export interface JobCounts {
 }
 
 export type JobItem =
+  | { name: JobName.AssetGenerateWaveformQueueAll; data: IBaseJob }
+  | { name: JobName.AssetGenerateWaveform; data: IEntityJob }
+  | { name: JobName.AssetTranscribeQueueAll; data: IBaseJob }
+  | { name: JobName.AssetTranscribe; data: IEntityJob & { manual?: boolean } }
+  | { name: JobName.AssetSummarizeQueueAll; data: IBaseJob }
+  | { name: JobName.AssetSummarize; data: IEntityJob & { manual?: boolean } }
   // Audit
   | { name: JobName.AuditTableCleanup; data?: IBaseJob }
 

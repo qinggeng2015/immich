@@ -5,6 +5,8 @@ import { camelCase, upperFirst } from 'lodash-es';
 import { Duration } from 'luxon';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
+import { extname } from 'node:path';
+import { createInterface } from 'node:readline';
 import { Writable } from 'node:stream';
 import sharp, { Sharp } from 'sharp';
 import type {
@@ -37,6 +39,15 @@ import {
   RawExtractedFormat,
 } from 'src/enum.js';
 import { LoggingRepository } from 'src/repositories/logging.repository.js';
+import { AUDIO_WAVEFORM_SAMPLE_RATE, AudioWaveformAccumulator } from 'src/utils/audio-waveform.js';
+import {
+  AUDIO_TRANSCRIPTION_CHUNK_SECONDS,
+  AUDIO_TRANSCRIPTION_SAMPLE_RATE,
+  AudioChunk,
+  encodePcmWav,
+  getAudioDecodeArguments,
+  getStreamingWavInputOptions,
+} from 'src/utils/audio.js';
 import { handlePromiseError } from 'src/utils/misc.js';
 import { createAffineMatrix } from 'src/utils/transform.js';
 
@@ -393,6 +404,194 @@ export class MediaRepository {
         });
       });
     });
+  }
+
+  probeAudioDuration(input: string, streamIndex: number): Promise<number | null> {
+    const ffprobe = spawn(
+      'ffprobe',
+      [
+        '-v',
+        'error',
+        '-select_streams',
+        String(streamIndex),
+        '-show_entries',
+        'packet=pts_time,duration_time',
+        '-of',
+        'csv=p=0',
+        input,
+      ],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    const lines = createInterface({ input: ffprobe.stdout, crlfDelay: Infinity });
+    let firstTimestamp = Infinity;
+    let lastTimestamp = -Infinity;
+    let totalDuration = 0;
+    let hasMissingTimestamp = false;
+    let stderr = '';
+
+    lines.on('line', (line) => {
+      const [timestampText, durationText] = line.split(',', 2);
+      const timestamp = Number(timestampText);
+      const duration = Number(durationText);
+      if (!Number.isFinite(duration) || duration <= 0) {
+        return;
+      }
+
+      totalDuration += duration;
+      if (Number.isFinite(timestamp)) {
+        firstTimestamp = Math.min(firstTimestamp, timestamp);
+        lastTimestamp = Math.max(lastTimestamp, timestamp + duration);
+      } else {
+        hasMissingTimestamp = true;
+      }
+    });
+    ffprobe.stderr.setEncoding('utf8');
+    ffprobe.stderr.on('data', (chunk: string) => (stderr = (stderr + chunk).slice(-16_384)));
+
+    return new Promise((resolve, reject) => {
+      ffprobe.on('error', (error) => {
+        lines.close();
+        reject(error);
+      });
+      ffprobe.on('close', (code) => {
+        lines.close();
+        if (code !== 0) {
+          return reject(new Error(`ffprobe exited with code ${code}: ${stderr.trim()}`));
+        }
+
+        const duration = hasMissingTimestamp ? totalDuration : lastTimestamp - firstTimestamp;
+        resolve(Number.isFinite(duration) && duration > 0 ? duration : null);
+      });
+    });
+  }
+
+  async generateAudioWaveform(input: string, streamIndex: number, signal?: AbortSignal) {
+    const inputOptions =
+      streamIndex === 0 && extname(input).toLowerCase() === '.wav' ? await this.getStreamingWavOptions(input) : [];
+    const args = getAudioDecodeArguments(input, streamIndex, AUDIO_WAVEFORM_SAMPLE_RATE, null, inputOptions);
+    let channelCount = '';
+    for await (const data of this.streamAudioProcess(
+      'ffprobe',
+      [
+        '-v',
+        'error',
+        '-select_streams',
+        String(streamIndex),
+        '-show_entries',
+        'stream=channels',
+        '-of',
+        'csv=p=0',
+        input,
+      ],
+      signal,
+    )) {
+      channelCount += data.toString();
+      if (channelCount.length > 64) {
+        throw new Error('Audio stream has invalid channel count');
+      }
+    }
+
+    const waveform = new AudioWaveformAccumulator(Number(channelCount.trim()));
+    for await (const data of this.streamAudioProcess('ffmpeg', args, signal)) {
+      waveform.add(data);
+    }
+    return waveform.finish();
+  }
+
+  async *streamAudioChunks(input: string, streamIndex: number, signal?: AbortSignal): AsyncGenerator<AudioChunk> {
+    const sampleRate = AUDIO_TRANSCRIPTION_SAMPLE_RATE;
+    const chunkBytes = AUDIO_TRANSCRIPTION_CHUNK_SECONDS * sampleRate * 2;
+    let buffer = Buffer.alloc(chunkBytes);
+    let bufferedBytes = 0;
+    let processedBytes = 0;
+    const inputOptions =
+      streamIndex === 0 && extname(input).toLowerCase() === '.wav' ? await this.getStreamingWavOptions(input) : [];
+    const args = getAudioDecodeArguments(input, streamIndex, sampleRate, 1, inputOptions);
+    for await (const data of this.streamAudioProcess('ffmpeg', args, signal)) {
+      let offset = 0;
+      while (offset < data.length) {
+        const bytes = Math.min(chunkBytes - bufferedBytes, data.length - offset);
+        data.copy(buffer, bufferedBytes, offset, offset + bytes);
+        bufferedBytes += bytes;
+        offset += bytes;
+        if (bufferedBytes !== chunkBytes) {
+          continue;
+        }
+
+        yield {
+          data: encodePcmWav(buffer, sampleRate),
+          startMs: (processedBytes / (sampleRate * 2)) * 1000,
+          durationMs: AUDIO_TRANSCRIPTION_CHUNK_SECONDS * 1000,
+        };
+        processedBytes += chunkBytes;
+        buffer = Buffer.alloc(chunkBytes);
+        bufferedBytes = 0;
+      }
+    }
+
+    if (bufferedBytes % 2 !== 0) {
+      throw new Error('Incomplete audio PCM sample');
+    }
+    if (processedBytes + bufferedBytes === 0) {
+      throw new Error('Audio contains no decoded samples');
+    }
+    if (bufferedBytes > 0) {
+      yield {
+        data: encodePcmWav(buffer.subarray(0, bufferedBytes), sampleRate),
+        startMs: (processedBytes / (sampleRate * 2)) * 1000,
+        durationMs: (bufferedBytes / (sampleRate * 2)) * 1000,
+      };
+    }
+  }
+
+  private async getStreamingWavOptions(input: string) {
+    const file = await fs.open(input, 'r');
+    try {
+      const { size } = await file.stat();
+      const header = Buffer.alloc(Math.min(size, 65_536));
+      const { bytesRead } = await file.read(header, 0, header.length, 0);
+      return getStreamingWavInputOptions(header.subarray(0, bytesRead), size);
+    } finally {
+      await file.close();
+    }
+  }
+
+  private async *streamAudioProcess(command: string, args: string[], signal?: AbortSignal): AsyncGenerator<Buffer> {
+    const decoder = spawn(command, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      signal,
+      killSignal: 'SIGKILL',
+    });
+    let stderr = '';
+    decoder.stderr.setEncoding('utf8');
+    decoder.stderr.on('data', (chunk: string) => (stderr = (stderr + chunk).slice(-16_384)));
+    const completed = new Promise<{ code: number | null; error?: Error }>((resolve) => {
+      let processError: Error | undefined;
+      decoder.once('error', (error) => {
+        processError = error;
+        decoder.stdout.destroy(error);
+      });
+      decoder.once('close', (code) => resolve({ code, error: processError }));
+    });
+
+    try {
+      for await (const data of decoder.stdout) {
+        yield data as Buffer;
+      }
+      const { code, error } = await completed;
+      if (error) {
+        throw error;
+      }
+      if (code !== 0) {
+        throw new Error(`Audio decoder exited with code ${code}: ${stderr.trim()}`);
+      }
+    } finally {
+      decoder.stdout.destroy();
+      if (decoder.exitCode === null && decoder.signalCode === null) {
+        decoder.kill('SIGKILL');
+      }
+      await completed;
+    }
   }
 
   transcode(input: string, output: string | Writable, options: TranscodeCommand): Promise<void> {

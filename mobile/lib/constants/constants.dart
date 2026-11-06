@@ -20,6 +20,7 @@ const String kBackupGroup = 'backup_group';
 const String kBackupLivePhotoGroup = 'backup_live_photo_group';
 const String kDownloadGroupImage = 'group_image';
 const String kDownloadGroupVideo = 'group_video';
+const String kDownloadGroupAudio = 'group_audio';
 const String kDownloadGroupLivePhoto = 'group_livephoto';
 const String kShareDownloadGroup = 'group_share';
 

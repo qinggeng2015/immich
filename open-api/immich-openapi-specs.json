@@ -4426,6 +4426,193 @@
         "x-immich-state": "Stable"
       }
     },
+    "/assets/{id}/audio/summary": {
+      "get": {
+        "description": "Retrieve the latest summary and its processing status for an accessible audio asset.",
+        "operationId": "getAssetAudioSummary",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetAudioSummaryResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve an audio summary",
+        "tags": [
+          "Assets"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.4.0",
+            "state": "Added"
+          },
+          {
+            "version": "v3.4.0",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "asset.read",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/assets/{id}/audio/transcript": {
+      "get": {
+        "description": "Retrieve the latest speech transcript and its processing status for an accessible audio asset.",
+        "operationId": "getAssetAudioTranscript",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetAudioTranscriptResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve an audio transcript",
+        "tags": [
+          "Assets"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.4.0",
+            "state": "Added"
+          },
+          {
+            "version": "v3.4.0",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "asset.read",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/assets/{id}/audio/waveform": {
+      "get": {
+        "description": "Retrieve the latest generated waveform and its processing status for an accessible audio asset.",
+        "operationId": "getAssetAudioWaveform",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "key",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetAudioWaveformResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve an audio waveform",
+        "tags": [
+          "Assets"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.4.0",
+            "state": "Added"
+          },
+          {
+            "version": "v3.4.0",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "asset.view",
+        "x-immich-state": "Beta"
+      }
+    },
     "/assets/{id}/edits": {
       "delete": {
         "description": "Removes all edit actions (crop, rotate, mirror) associated with the specified asset.",
@@ -12551,6 +12738,31 @@
             }
           },
           {
+            "name": "transcript",
+            "required": false,
+            "in": "query",
+            "description": "Filter by recognized audio speech text",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated",
+            "deprecated": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "trashedAfter",
             "required": false,
             "in": "query",
@@ -18909,6 +19121,78 @@
         ],
         "type": "object"
       },
+      "AdminConfigAudioSummaryDto": {
+        "properties": {
+          "apiKey": {
+            "description": "API key; omitted or empty retains the stored key",
+            "maxLength": 4096,
+            "type": "string"
+          },
+          "apiKeyConfigured": {
+            "description": "Whether an API key is configured; read only",
+            "type": "boolean"
+          },
+          "autoSummarize": {
+            "description": "Automatically summarize completed audio transcripts",
+            "type": "boolean"
+          },
+          "baseUrl": {
+            "description": "OpenAI-compatible API base URL",
+            "maxLength": 4096,
+            "type": "string"
+          },
+          "clearApiKey": {
+            "description": "Explicitly clear the stored API key",
+            "type": "boolean"
+          },
+          "enabled": {
+            "description": "Whether the task is enabled",
+            "type": "boolean"
+          },
+          "maxOutputTokens": {
+            "description": "Maximum output tokens per summary request",
+            "maximum": 8192,
+            "minimum": 128,
+            "type": "integer"
+          },
+          "modelName": {
+            "description": "Name of the summary model to use",
+            "maxLength": 256,
+            "type": "string"
+          },
+          "prompt": {
+            "description": "Instructions for summarizing transcripts",
+            "maxLength": 16000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "protocol": {
+            "description": "OpenAI-compatible API protocol",
+            "enum": [
+              "chat-completions",
+              "responses"
+            ],
+            "type": "string"
+          },
+          "timeoutMs": {
+            "description": "Timeout for each summary request in milliseconds",
+            "maximum": 600000,
+            "minimum": 1000,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "autoSummarize",
+          "baseUrl",
+          "enabled",
+          "maxOutputTokens",
+          "modelName",
+          "prompt",
+          "protocol",
+          "timeoutMs"
+        ],
+        "type": "object"
+      },
       "AdminConfigBackupsDto": {
         "properties": {
           "beta": {
@@ -19451,6 +19735,12 @@
       },
       "AdminConfigJobDto": {
         "properties": {
+          "audioSummary": {
+            "$ref": "#/components/schemas/AdminConfigJobSettingsDto"
+          },
+          "audioWaveform": {
+            "$ref": "#/components/schemas/AdminConfigJobSettingsDto"
+          },
           "backgroundTask": {
             "$ref": "#/components/schemas/AdminConfigJobSettingsDto"
           },
@@ -19485,6 +19775,9 @@
             "$ref": "#/components/schemas/AdminConfigJobSettingsDto"
           },
           "smartSearch": {
+            "$ref": "#/components/schemas/AdminConfigJobSettingsDto"
+          },
+          "speechToText": {
             "$ref": "#/components/schemas/AdminConfigJobSettingsDto"
           },
           "thumbnailGeneration": {
@@ -19616,6 +19909,9 @@
       },
       "AdminConfigMachineLearningDto": {
         "properties": {
+          "audioSummary": {
+            "$ref": "#/components/schemas/AdminConfigAudioSummaryDto"
+          },
           "availabilityChecks": {
             "$ref": "#/components/schemas/AdminConfigMachineLearningAvailabilityChecksDto"
           },
@@ -19634,6 +19930,9 @@
           },
           "ocr": {
             "$ref": "#/components/schemas/AdminConfigOcrDto"
+          },
+          "speechToText": {
+            "$ref": "#/components/schemas/AdminConfigSpeechToTextDto"
           },
           "urls": {
             "description": "ML service URLs",
@@ -20052,6 +20351,40 @@
           "port",
           "secure",
           "username"
+        ],
+        "type": "object"
+      },
+      "AdminConfigSpeechToTextDto": {
+        "properties": {
+          "autoTranscribe": {
+            "description": "Automatically transcribe newly processed audio",
+            "type": "boolean"
+          },
+          "enabled": {
+            "description": "Whether the task is enabled",
+            "type": "boolean"
+          },
+          "language": {
+            "description": "Speech language or automatic detection",
+            "enum": [
+              "auto",
+              "zh",
+              "en",
+              "yue",
+              "ja",
+              "ko"
+            ],
+            "type": "string"
+          },
+          "modelName": {
+            "description": "Name of the model to use",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "language",
+          "modelName"
         ],
         "type": "object"
       },
@@ -20569,6 +20902,72 @@
             "type": "array"
           }
         },
+        "type": "object"
+      },
+      "AssetAudioSummaryResponseDto": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/AudioAnalysisStatus",
+            "description": "Summary processing state"
+          },
+          "summary": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AudioSummaryDto"
+              }
+            ],
+            "description": "Most recent successful summary for the current transcript",
+            "nullable": true
+          }
+        },
+        "required": [
+          "status",
+          "summary"
+        ],
+        "type": "object"
+      },
+      "AssetAudioTranscriptResponseDto": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/AudioAnalysisStatus",
+            "description": "Transcription processing state"
+          },
+          "transcript": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AudioTranscriptDto"
+              }
+            ],
+            "description": "Most recent successful transcript, when available",
+            "nullable": true
+          }
+        },
+        "required": [
+          "status",
+          "transcript"
+        ],
+        "type": "object"
+      },
+      "AssetAudioWaveformResponseDto": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/AudioAnalysisStatus",
+            "description": "Waveform processing state"
+          },
+          "waveform": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AudioWaveformDto"
+              }
+            ],
+            "description": "Most recent successful waveform, when available",
+            "nullable": true
+          }
+        },
+        "required": [
+          "status",
+          "waveform"
+        ],
         "type": "object"
       },
       "AssetBulkDeleteDto": {
@@ -21212,6 +21611,9 @@
       "AssetJobName": {
         "description": "Job name",
         "enum": [
+          "generate-waveform",
+          "transcribe-audio",
+          "summarize-audio",
           "refresh-faces",
           "refresh-metadata",
           "regenerate-thumbnail",
@@ -21918,6 +22320,18 @@
         ],
         "type": "string"
       },
+      "AudioAnalysisStatus": {
+        "description": "Audio analysis status",
+        "enum": [
+          "unprocessed",
+          "pending",
+          "processing",
+          "ready",
+          "failed",
+          "disabled"
+        ],
+        "type": "string"
+      },
       "AudioCodec": {
         "description": "Target audio codec",
         "enum": [
@@ -21927,6 +22341,132 @@
           "pcm_s16le"
         ],
         "type": "string"
+      },
+      "AudioSummaryDto": {
+        "properties": {
+          "modelName": {
+            "description": "Model used to generate the summary",
+            "type": "string"
+          },
+          "text": {
+            "description": "Generated summary of the transcript",
+            "type": "string"
+          },
+          "updatedAt": {
+            "description": "Time the summary was generated",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "modelName",
+          "text",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "AudioTranscriptDto": {
+        "properties": {
+          "language": {
+            "description": "Detected language, when available",
+            "nullable": true,
+            "type": "string"
+          },
+          "modelName": {
+            "description": "Speech recognition model used",
+            "type": "string"
+          },
+          "segmentType": {
+            "description": "Segment timestamps mark input chunks rather than word alignment",
+            "enum": [
+              "chunk"
+            ],
+            "type": "string"
+          },
+          "segments": {
+            "description": "Recognized audio chunks in playback order",
+            "items": {
+              "$ref": "#/components/schemas/AudioTranscriptSegmentDto"
+            },
+            "type": "array"
+          },
+          "text": {
+            "description": "Full recognized transcript; empty for audio without recognized speech",
+            "type": "string"
+          }
+        },
+        "required": [
+          "language",
+          "modelName",
+          "segmentType",
+          "segments",
+          "text"
+        ],
+        "type": "object"
+      },
+      "AudioTranscriptSegmentDto": {
+        "properties": {
+          "endMs": {
+            "description": "Input audio chunk end in milliseconds",
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          },
+          "startMs": {
+            "description": "Input audio chunk start in milliseconds",
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          },
+          "text": {
+            "description": "Recognized text for the chunk",
+            "type": "string"
+          }
+        },
+        "required": [
+          "endMs",
+          "startMs",
+          "text"
+        ],
+        "type": "object"
+      },
+      "AudioWaveformDto": {
+        "properties": {
+          "durationMs": {
+            "description": "Decoded audio duration in milliseconds",
+            "exclusiveMinimum": true,
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          },
+          "peaks": {
+            "description": "Normalized peak amplitudes across equal time intervals",
+            "items": {
+              "format": "double",
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "maxItems": 1024,
+            "minItems": 1024,
+            "type": "array"
+          },
+          "version": {
+            "description": "Waveform data format version",
+            "enum": [
+              1
+            ],
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "durationMs",
+          "peaks",
+          "version"
+        ],
+        "type": "object"
       },
       "AuthStatusResponseDto": {
         "properties": {
@@ -23198,6 +23738,12 @@
       "JobName": {
         "description": "Job name",
         "enum": [
+          "AssetGenerateWaveformQueueAll",
+          "AssetGenerateWaveform",
+          "AssetTranscribeQueueAll",
+          "AssetTranscribe",
+          "AssetSummarizeQueueAll",
+          "AssetSummarize",
           "AssetDelete",
           "AssetDeleteCheck",
           "AssetDetectFacesQueueAll",
@@ -24704,6 +25250,26 @@
           "thumbnailPath": {
             "deprecated": true,
             "description": "Filter by thumbnail file path",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "transcript": {
+            "deprecated": true,
+            "description": "Filter by recognized audio speech text",
             "type": "string",
             "x-immich-history": [
               {
@@ -26761,6 +27327,9 @@
       "QueueName": {
         "description": "Queue name",
         "enum": [
+          "audioWaveform",
+          "speechToText",
+          "audioSummary",
           "thumbnailGeneration",
           "metadataExtraction",
           "videoConversion",
@@ -27480,6 +28049,26 @@
             ],
             "x-immich-state": "Deprecated"
           },
+          "transcript": {
+            "deprecated": true,
+            "description": "Filter by recognized audio speech text",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
           "trashedAfter": {
             "deprecated": true,
             "description": "Filter by trash date (after)",
@@ -28065,6 +28654,9 @@
           "takenAt": {
             "$ref": "#/components/schemas/DateFilter"
           },
+          "transcript": {
+            "$ref": "#/components/schemas/StringSimilarityFilter"
+          },
           "trashedAt": {
             "$ref": "#/components/schemas/DateFilterNullable"
           },
@@ -28166,6 +28758,9 @@
           },
           "takenAt": {
             "$ref": "#/components/schemas/DateFilter"
+          },
+          "transcript": {
+            "$ref": "#/components/schemas/StringSimilarityFilter"
           },
           "trashedAt": {
             "$ref": "#/components/schemas/DateFilterNullable"
@@ -28458,6 +29053,18 @@
       },
       "ServerFeaturesDto": {
         "properties": {
+          "audio": {
+            "description": "Whether audio assets are supported",
+            "type": "boolean"
+          },
+          "audioSummary": {
+            "description": "Whether audio summary retrieval and generation are supported",
+            "type": "boolean"
+          },
+          "audioWaveform": {
+            "description": "Whether audio waveform retrieval and generation are supported",
+            "type": "boolean"
+          },
           "backups": {
             "description": "Whether the backups feature is enabled",
             "type": "boolean"
@@ -28522,6 +29129,10 @@
             "description": "Whether smart search is enabled",
             "type": "boolean"
           },
+          "speechToText": {
+            "description": "Whether audio transcription retrieval and generation are supported",
+            "type": "boolean"
+          },
           "trash": {
             "description": "Whether trash feature is enabled",
             "type": "boolean"
@@ -28550,6 +29161,13 @@
       },
       "ServerMediaTypesResponseDto": {
         "properties": {
+          "audio": {
+            "description": "Supported audio filename extensions",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "image": {
             "description": "Supported image MIME types",
             "items": {
@@ -29756,6 +30374,26 @@
             ],
             "x-immich-state": "Deprecated"
           },
+          "transcript": {
+            "deprecated": true,
+            "description": "Filter by recognized audio speech text",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
           "trashedAfter": {
             "deprecated": true,
             "description": "Filter by trash date (after)",
@@ -30464,6 +31102,26 @@
             "example": "2024-01-01T00:00:00.000Z",
             "format": "date-time",
             "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "transcript": {
+            "deprecated": true,
+            "description": "Filter by recognized audio speech text",
             "type": "string",
             "x-immich-history": [
               {
@@ -33062,6 +33720,13 @@
             },
             "type": "array"
           },
+          "isAudio": {
+            "description": "Array indicating whether each asset is audio",
+            "items": {
+              "type": "boolean"
+            },
+            "type": "array"
+          },
           "isFavorite": {
             "description": "Array indicating whether each asset is favorited",
             "items": {
@@ -33726,6 +34391,23 @@
         ],
         "type": "string"
       },
+      "UserConfigAudioSummaryDto": {
+        "properties": {
+          "autoSummarize": {
+            "description": "Automatically summarize completed audio transcripts",
+            "type": "boolean"
+          },
+          "enabled": {
+            "description": "Whether the task is enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "autoSummarize",
+          "enabled"
+        ],
+        "type": "object"
+      },
       "UserConfigClipDto": {
         "properties": {
           "enabled": {
@@ -33911,6 +34593,9 @@
       },
       "UserConfigMachineLearningDto": {
         "properties": {
+          "audioSummary": {
+            "$ref": "#/components/schemas/UserConfigAudioSummaryDto"
+          },
           "clip": {
             "$ref": "#/components/schemas/UserConfigClipDto"
           },
@@ -33926,6 +34611,9 @@
           },
           "ocr": {
             "$ref": "#/components/schemas/UserConfigOcrDto"
+          },
+          "speechToText": {
+            "$ref": "#/components/schemas/UserConfigSpeechToTextDto"
           }
         },
         "required": [
@@ -34073,6 +34761,22 @@
         "properties": {
           "enabled": {
             "description": "Whether SMTP email notifications are enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "UserConfigSpeechToTextDto": {
+        "properties": {
+          "autoTranscribe": {
+            "description": "Automatically transcribe newly processed audio",
+            "type": "boolean"
+          },
+          "enabled": {
+            "description": "Whether the task is enabled",
             "type": "boolean"
           }
         },

@@ -5,7 +5,16 @@ import { BulkIdErrorReason, BulkIdResponseDto, BulkIdsDto } from 'src/dtos/asset
 import { MapAsset, mapAsset } from 'src/dtos/asset-response.dto.js';
 import { AuthDto } from 'src/dtos/auth.dto.js';
 import { DuplicateResolveDto, DuplicateResolveGroupDto, DuplicateResponseDto } from 'src/dtos/duplicate.dto.js';
-import { AssetStatus, AssetVisibility, DatabaseLock, JobName, JobStatus, Permission, QueueName } from 'src/enum.js';
+import {
+  AssetStatus,
+  AssetType,
+  AssetVisibility,
+  DatabaseLock,
+  JobName,
+  JobStatus,
+  Permission,
+  QueueName,
+} from 'src/enum.js';
 import { AssetDuplicateResult } from 'src/repositories/search.repository.js';
 import { BaseService } from 'src/services/base.service.js';
 import { suggestDuplicateKeepAssetIds } from 'src/utils/duplicate.js';
@@ -327,6 +336,10 @@ export class DuplicateService extends BaseService {
       if (!asset) {
         this.logger.error(`Asset ${id} not found`);
         return JobStatus.Failed;
+      }
+
+      if (asset.type === AssetType.Audio) {
+        return JobStatus.Skipped;
       }
 
       if (asset.stackId) {

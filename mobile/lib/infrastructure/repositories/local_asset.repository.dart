@@ -182,7 +182,9 @@ class LocalAssetRepository extends DatabaseAccessor<Drift> with $LocalAssetRepos
     Expression<bool> whereClause =
         _db.localAssetEntity.createdAt.isSmallerOrEqualValue(cutoffDate) &
         _db.remoteAssetEntity.ownerId.equals(userId) &
-        _db.remoteAssetEntity.deletedAt.isNull();
+        _db.remoteAssetEntity.deletedAt.isNull() &
+        _db.localAssetEntity.id.like('audio-file:%').not() &
+        _db.localAssetEntity.id.like('saf-file:%').not();
 
     // Exclude assets that are in iOS shared albums
     whereClause = whereClause & _db.localAssetEntity.id.isNotInQuery(iosSharedAlbumAssets);

@@ -122,6 +122,7 @@ export const uploadRequest = async <T>(options: UploadRequestOptions): Promise<{
     }
 
     xhr.open(options.method || 'POST', url);
+    xhr.setRequestHeader('x-immich-features', 'audio,audio-analysis,audio-summary');
     xhr.responseType = 'json';
     xhr.send(data);
   });

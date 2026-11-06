@@ -1,6 +1,8 @@
 import { locale } from '#lib/stores/preferences.store.ts';
 import { parseUtcDate } from '#lib/utils/date-time.ts';
-import { formatGroupTitle, toISOYearMonthUTC } from '#lib/utils/timeline-util.ts';
+import { formatGroupTitle, toISOYearMonthUTC, toTimelineAsset } from '#lib/utils/timeline-util.ts';
+import { factory } from '#test/unit/factories.ts';
+import { AssetTypeEnum } from '@immich/sdk';
 import { DateTime } from 'luxon';
 
 describe('formatGroupTitle', () => {
@@ -95,5 +97,17 @@ describe('toISOYearMonthUTC', () => {
 
   it('should prefix month with 0s', () => {
     expect(toISOYearMonthUTC({ year: 2025, month: 1 })).toBe('2025-01-01T00:00:00.000Z');
+  });
+});
+
+describe('toTimelineAsset media types', () => {
+  it.each([
+    [AssetTypeEnum.Image, true, false, false],
+    [AssetTypeEnum.Video, false, true, false],
+    [AssetTypeEnum.Audio, false, false, true],
+    [AssetTypeEnum.Other, false, false, false],
+  ])('maps %s without confusing media types', (type, isImage, isVideo, isAudio) => {
+    const asset = toTimelineAsset(factory.asset({ type }));
+    expect(asset).toMatchObject({ isImage, isVideo, isAudio });
   });
 });

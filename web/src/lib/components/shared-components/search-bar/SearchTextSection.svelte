@@ -2,6 +2,9 @@
   import { getSearchTypeTitle } from './search-bar-utils';
   import SearchButton from './SearchButton.svelte';
   import { searchManager } from '#lib/managers/search-manager.svelte.ts';
+  import { MediaType } from '#lib/constants.ts';
+  import { featureFlagsManager } from '#lib/managers/feature-flags-manager.svelte.ts';
+  import type { SearchFilter } from '#lib/types.ts';
   import { Text } from '@immich/ui';
   import { t } from 'svelte-i18n';
   import { createPreloadedQuery } from '#lib/queries/client.ts';
@@ -10,9 +13,10 @@
   const query = createPreloadedQuery(getUserConfigQuery);
   const config = $derived(query.data);
 
-  let queryType = $derived(searchManager.filter.queryType);
+  let queryType = $derived(searchManager.queryType);
+  const isAudio = $derived(searchManager.filter.mediaType === MediaType.Audio);
 
-  const setType = (type: 'smart' | 'metadata' | 'description' | 'fullPath' | 'ocr') => {
+  const setType = (type: SearchFilter['queryType']) => {
     searchManager.setQueryType(type);
   };
 </script>
@@ -21,7 +25,7 @@
   <fieldset>
     <Text class="mb-5">{$t('search_type_description')}</Text>
     <div class="flex flex-wrap gap-2">
-      {#if config.machineLearning.clip.enabled}
+      {#if config.machineLearning.clip.enabled && !isAudio}
         <SearchButton checked active={queryType === 'smart'} onclick={() => setType('smart')}>
           {$t('context')}
         </SearchButton>
@@ -35,9 +39,14 @@
       <SearchButton checked active={queryType === 'fullPath'} onclick={() => setType('fullPath')}>
         {getSearchTypeTitle('fullPath')}
       </SearchButton>
-      {#if config.machineLearning.ocr.enabled}
+      {#if config.machineLearning.ocr.enabled && !isAudio}
         <SearchButton checked active={queryType === 'ocr'} onclick={() => setType('ocr')}>
           {getSearchTypeTitle('ocr')}
+        </SearchButton>
+      {/if}
+      {#if featureFlagsManager.supportsSpeechToText}
+        <SearchButton checked active={queryType === 'transcript'} onclick={() => setType('transcript')}>
+          {$t('audio_transcript')}
         </SearchButton>
       {/if}
     </div>

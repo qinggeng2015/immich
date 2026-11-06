@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/extensions/theme_extensions.dart';
+import 'package:immich_mobile/presentation/widgets/asset_viewer/audio_cover.widget.dart';
 import 'package:immich_mobile/presentation/widgets/images/image_provider.dart';
 import 'package:immich_mobile/presentation/widgets/images/remote_image_provider.dart';
 import 'package:immich_mobile/presentation/widgets/images/thumb_hash_provider.dart';
@@ -17,8 +18,9 @@ class Thumbnail extends StatefulWidget {
   final ImageProvider? imageProvider;
   final ImageProvider? thumbhashProvider;
   final BoxFit fit;
+  final BaseAsset? audioAsset;
 
-  const Thumbnail({this.imageProvider, this.fit = BoxFit.cover, this.thumbhashProvider, super.key});
+  const Thumbnail({this.imageProvider, this.fit = BoxFit.cover, this.thumbhashProvider, super.key}) : audioAsset = null;
 
   Thumbnail.remote({
     required String remoteId,
@@ -29,7 +31,8 @@ class Thumbnail extends StatefulWidget {
     Size? decodeSize,
     super.key,
   }) : imageProvider = RemoteImageProvider.thumbnail(assetId: remoteId, thumbhash: thumbhash, decodeSize: decodeSize),
-       thumbhashProvider = null;
+       thumbhashProvider = null,
+       audioAsset = null;
 
   Thumbnail.fromAsset({
     required BaseAsset? asset,
@@ -41,7 +44,9 @@ class Thumbnail extends StatefulWidget {
     /// Physical size to decode for remote thumbnails.
     Size? remoteSize,
     super.key,
-  }) : thumbhashProvider = switch (asset) {
+  }) : audioAsset = asset?.isAudio == true ? asset : null,
+       thumbhashProvider = switch (asset) {
+         BaseAsset() when asset.isAudio => null,
          RemoteAsset() when asset.thumbHash != null && asset.localId == null => ThumbHashProvider(
            thumbHash: asset.thumbHash!,
          ),
@@ -220,6 +225,11 @@ class _ThumbnailState extends State<Thumbnail> with SingleTickerProviderStateMix
 
   @override
   Widget build(BuildContext context) {
+    final audioAsset = widget.audioAsset;
+    if (audioAsset != null) {
+      return AudioCover(asset: audioAsset);
+    }
+
     final colorScheme = context.colorScheme;
     final gradient = _gradientCache[colorScheme] ??= LinearGradient(
       colors: [colorScheme.surfaceContainer, colorScheme.surfaceContainer.darken(amount: .1)],

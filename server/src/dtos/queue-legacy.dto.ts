@@ -58,7 +58,13 @@ export const mapQueuesLegacy = (responses: QueueResponseDto[]): QueuesResponseLe
   const legacy = new QueuesResponseLegacyDto();
 
   for (const response of responses) {
-    legacy[response.name] = mapQueueLegacy(response);
+    if (
+      response.name !== QueueName.AudioWaveform &&
+      response.name !== QueueName.SpeechToText &&
+      response.name !== QueueName.AudioSummary
+    ) {
+      legacy[response.name] = mapQueueLegacy(response);
+    }
   }
 
   return legacy;

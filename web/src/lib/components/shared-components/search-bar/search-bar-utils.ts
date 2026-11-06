@@ -89,6 +89,9 @@ export const getSearchTypeTitle = (type: string) => {
     case 'ocr': {
       return $t('ocr');
     }
+    case 'transcript': {
+      return $t('audio_transcript');
+    }
     default: {
       return;
     }
@@ -110,6 +113,9 @@ export const getSearchTypePlaceholder = (type: string) => {
     case 'ocr': {
       return $t('search_by_ocr_example');
     }
+    case 'transcript': {
+      return $t('search_by_transcript_example');
+    }
     case 'smart': {
       return $t('search_by_context_example');
     }
@@ -130,6 +136,9 @@ export const getSearchMediaTitle = (mediaType: MediaType) => {
     }
     case MediaType.Video: {
       return $t('video');
+    }
+    case MediaType.Audio: {
+      return $t('audio');
     }
     default: {
       return;

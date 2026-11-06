@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { Kysely } from 'kysely';
-import { AssetOrderBy, AssetVisibility, SharedLinkType } from 'src/enum.js';
+import { AssetOrderBy, AssetType, AssetVisibility, SharedLinkType } from 'src/enum.js';
 import { AccessRepository } from 'src/repositories/access.repository.js';
 import { AssetRepository } from 'src/repositories/asset.repository.js';
 import { LoggingRepository } from 'src/repositories/logging.repository.js';
@@ -28,6 +28,31 @@ beforeAll(async () => {
 });
 
 describe(TimelineService.name, () => {
+  it.each([false, true])('should keep audio bucket counts aligned with capability %s', async (audioSupported) => {
+    const { sut, ctx } = setup();
+    const { user } = await ctx.newUser();
+    const auth = { ...factory.auth({ user }), audioSupported };
+    const assets = [];
+    for (const type of [AssetType.Image, AssetType.Video, AssetType.Audio]) {
+      const { asset } = await ctx.newAsset({ ownerId: user.id, type, localDateTime: new Date('1970-02-12') });
+      await ctx.newExif({ assetId: asset.id, description: 'Audio compatibility fixture' });
+      assets.push(asset);
+    }
+
+    const buckets = await sut.getTimeBuckets(auth, {});
+    const bucket = JSON.parse(await sut.getTimeBucket(auth, { timeBucket: '1970-02-01' }));
+    const expectedAssets = assets.filter((asset) => audioSupported || asset.type !== AssetType.Audio);
+
+    expect(buckets).toEqual([{ count: expectedAssets.length, timeBucket: '1970-02-01' }]);
+    expect(bucket.id).toHaveLength(expectedAssets.length);
+    expect(new Set(bucket.id)).toEqual(new Set(expectedAssets.map((asset) => asset.id)));
+    for (const asset of expectedAssets) {
+      const index = bucket.id.indexOf(asset.id);
+      expect(bucket.isImage[index]).toBe(asset.type === AssetType.Image);
+      expect(bucket.isAudio[index]).toBe(asset.type === AssetType.Audio);
+    }
+  });
+
   describe('getTimeBuckets', () => {
     it('should get time buckets by month', async () => {
       const { sut, ctx } = setup();
@@ -146,6 +171,7 @@ describe(TimelineService.name, () => {
         visibility: [],
         isFavorite: [],
         isImage: [],
+        isAudio: [],
         isTrashed: [],
         livePhotoVideoId: [],
         fileCreatedAt: [],

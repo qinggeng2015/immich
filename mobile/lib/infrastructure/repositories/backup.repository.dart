@@ -34,7 +34,7 @@ class BackupRepository extends DatabaseAccessor<Drift> with $BackupRepositoryMix
   /// - remainder: number of those assets that do not yet exist on the server for [userId]
   ///              (includes processing)
   /// - processing: number of those assets that are still preparing/have a null checksum
-  Future<({int total, int remainder, int processing})> getAllCounts(String userId) async {
+  Future<({int total, int remainder, int processing})> getAllCounts(String userId, {bool includeAudio = false}) async {
     const sql = '''
         SELECT
         COUNT(*) AS total_count,
@@ -50,6 +50,7 @@ class BackupRepository extends DatabaseAccessor<Drift> with $BackupRepositoryMix
             WHERE laa.asset_id = lae.id
                 AND la.backup_selection = ?2
         )
+        AND (?4 OR lae.type != ?5)
         AND NOT EXISTS (
             SELECT 1
             FROM local_album_asset_entity laa
@@ -66,6 +67,8 @@ class BackupRepository extends DatabaseAccessor<Drift> with $BackupRepositoryMix
             Variable.withString(userId),
             Variable.withInt(BackupSelection.selected.index),
             Variable.withInt(BackupSelection.excluded.index),
+            Variable.withBool(includeAudio),
+            Variable.withInt(AssetType.audio.index),
           ],
           readsFrom: {_db.localAlbumAssetEntity, _db.localAlbumEntity, _db.localAssetEntity, _db.remoteAssetEntity},
         )
@@ -79,7 +82,7 @@ class BackupRepository extends DatabaseAccessor<Drift> with $BackupRepositoryMix
     );
   }
 
-  Future<List<LocalAsset>> getCandidates(String userId, {bool onlyHashed = true}) async {
+  Future<List<LocalAsset>> getCandidates(String userId, {bool onlyHashed = true, bool includeAudio = false}) async {
     final selectedAlbumIds = _db.localAlbumEntity.selectOnly(distinct: true)
       ..addColumns([_db.localAlbumEntity.id])
       ..where(_db.localAlbumEntity.backupSelection.equalsValue(BackupSelection.selected));
@@ -105,6 +108,10 @@ class BackupRepository extends DatabaseAccessor<Drift> with $BackupRepositoryMix
             lae.id.isNotInQuery(_getExcludedSubquery()),
       )
       ..orderBy([(localAsset) => OrderingTerm.desc(localAsset.createdAt)]);
+
+    if (!includeAudio) {
+      query.where((lae) => lae.type.equalsValue(AssetType.audio).not());
+    }
 
     if (onlyHashed) {
       query.where((lae) => lae.checksum.isNotNull());

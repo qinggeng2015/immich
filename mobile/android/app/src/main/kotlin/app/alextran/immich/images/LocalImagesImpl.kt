@@ -15,6 +15,7 @@ import androidx.annotation.RequiresApi
 import androidx.exifinterface.media.ExifInterface
 import app.alextran.immich.NativeBuffer
 import app.alextran.immich.NativeImage
+import app.alextran.immich.directories.SelectedDirectoryStore
 import kotlin.math.*
 import java.io.IOException
 import java.util.concurrent.Executors
@@ -115,6 +116,7 @@ fun Bitmap.toNativeBuffer(): Map<String, Long>  {
 class LocalImagesImpl(context: Context) : LocalImageApi {
   private val ctx: Context = context.applicationContext
   private val resolver: ContentResolver = ctx.contentResolver
+  private val directoryStore = SelectedDirectoryStore(ctx)
   private val requestThread = Executors.newSingleThreadExecutor()
   private val threadPool =
     Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() / 2 + 1)
@@ -198,8 +200,8 @@ class LocalImagesImpl(context: Context) : LocalImageApi {
     signal: CancellationSignal
   ) {
     signal.throwIfCanceled()
-    val id = assetId.toLong()
-    val uri = ContentUris.withAppendedId(Images.Media.EXTERNAL_CONTENT_URI, id)
+    val uri = if (assetId.startsWith("saf-file:")) directoryStore.getUri(assetId)
+    else ContentUris.withAppendedId(Images.Media.EXTERNAL_CONTENT_URI, assetId.toLong())
 
     signal.throwIfCanceled()
     val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
@@ -231,6 +233,22 @@ class LocalImagesImpl(context: Context) : LocalImageApi {
   ) {
     signal.throwIfCanceled()
     val size = Size(width.toInt(), height.toInt())
+    if (assetId.startsWith("saf-file:")) {
+      val uri = directoryStore.getUri(assetId)
+      val bitmap = if (isVideo) {
+        val target = if (size.width > 0 && size.height > 0) size else Size(768, 768)
+        val request = Glide.with(ctx).asBitmap().load(uri).disallowHardwareConfig()
+          .format(DecodeFormat.PREFER_ARGB_8888).submit(target.width, target.height)
+        signal.setOnCancelListener { Glide.with(ctx).clear(request) }
+        request.get()
+      } else decodeSource(uri, size, signal)
+      signal.throwIfCanceled()
+      val orientation = if (!isVideo && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && isRawMime(uri)) {
+        rawOrientation(uri)
+      } else ExifInterface.ORIENTATION_NORMAL
+      callback(Result.success(rotateToNativeBuffer(bitmap, orientation)))
+      return
+    }
     val id = assetId.toLong()
 
     signal.throwIfCanceled()

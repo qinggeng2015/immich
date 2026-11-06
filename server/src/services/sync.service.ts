@@ -13,7 +13,7 @@ import {
   SyncStreamDto,
   syncAlbumV2ToV1,
 } from 'src/dtos/sync.dto.js';
-import { JobName, MemoryType, QueueName, SyncEntityType, SyncRequestType } from 'src/enum.js';
+import { AssetType, JobName, MemoryType, QueueName, SyncEntityType, SyncRequestType } from 'src/enum.js';
 import { SyncQueryOptions } from 'src/repositories/sync.repository.js';
 import { SessionSyncCheckpointTable } from 'src/schema/tables/sync-checkpoint.table.js';
 import { BaseService } from 'src/services/base.service.js';
@@ -30,9 +30,40 @@ type AssetLike = Omit<SyncAssetV2, 'checksum' | 'thumbhash'> & {
 const COMPLETE_ID = 'complete';
 const MAX_DAYS = 30;
 const MAX_DURATION = Duration.fromObject({ days: MAX_DAYS });
+const AUDIO_SYNC_CHECKPOINTS: Partial<Record<SyncRequestType, SyncEntityType[]>> = {
+  [SyncRequestType.AssetsV2]: [SyncEntityType.AssetV2],
+  [SyncRequestType.PartnerAssetsV2]: [SyncEntityType.PartnerAssetV2, SyncEntityType.PartnerAssetBackfillV2],
+  [SyncRequestType.AlbumAssetsV2]: [
+    SyncEntityType.AlbumAssetCreateV2,
+    SyncEntityType.AlbumAssetUpdateV2,
+    SyncEntityType.AlbumAssetBackfillV2,
+  ],
+};
+const AUDIO_SYNC_TYPES = Object.keys(AUDIO_SYNC_CHECKPOINTS) as SyncRequestType[];
 
-const mapSyncAssetV2 = ({ checksum, thumbhash, ...data }: AssetLike): SyncAssetV2 => ({
+const getAudioSyncGroups = (extraId: string | undefined, key: 'audio' | 'pending') => {
+  const groups = extraId
+    ?.split(';')
+    .find((part) => part.startsWith(`${key}:`))
+    ?.slice(key.length + 1)
+    .split(',');
+  return new Set(AUDIO_SYNC_TYPES.filter((type) => groups?.includes(type)));
+};
+
+const toAudioSyncExtraId = (supported: Set<SyncRequestType>, pending: Set<SyncRequestType>) => {
+  const parts = [];
+  if (supported.size > 0) {
+    parts.push(`audio:${AUDIO_SYNC_TYPES.filter((type) => supported.has(type)).join(',')}`);
+  }
+  if (pending.size > 0) {
+    parts.push(`pending:${AUDIO_SYNC_TYPES.filter((type) => pending.has(type)).join(',')}`);
+  }
+  return parts.length > 0 ? parts.join(';') : undefined;
+};
+
+const mapSyncAssetV2 = ({ checksum, thumbhash, ...data }: AssetLike, audioSupported?: boolean): SyncAssetV2 => ({
   ...data,
+  type: data.type === AssetType.Audio && !audioSupported ? AssetType.Other : data.type,
   checksum: hexOrBufferToBase64(checksum),
   thumbhash: thumbhash ? hexOrBufferToBase64(thumbhash) : null,
 });
@@ -185,6 +216,32 @@ export class SyncService extends BaseService {
 
     const { nowId } = await this.syncCheckpointRepository.getNow();
     const options: SyncQueryOptions = { nowId, userId: auth.user.id };
+    const completeCheckpoint = checkpointMap[SyncEntityType.SyncCompleteV1];
+    const audioGroups = getAudioSyncGroups(completeCheckpoint?.extraId, 'audio');
+    const pendingAudioGroups = getAudioSyncGroups(completeCheckpoint?.extraId, 'pending');
+    const audioSupported = auth.audioSupported === true;
+    const replayTypes = AUDIO_SYNC_TYPES.filter(
+      (type) => dto.types.includes(type) && (pendingAudioGroups.has(type) || audioGroups.has(type) !== audioSupported),
+    );
+    if (replayTypes.length > 0) {
+      for (const type of replayTypes) {
+        pendingAudioGroups.add(type);
+        for (const checkpointType of AUDIO_SYNC_CHECKPOINTS[type]!) {
+          delete checkpointMap[checkpointType];
+        }
+      }
+      await this.syncCheckpointRepository.upsertAll([
+        {
+          sessionId: session.id,
+          type: SyncEntityType.SyncCompleteV1,
+          ack: toAck({
+            type: SyncEntityType.SyncCompleteV1,
+            updateId: completeCheckpoint?.updateId ?? nowId,
+            extraId: toAudioSyncExtraId(audioGroups, pendingAudioGroups),
+          }),
+        },
+      ]);
+    }
 
     const handlers: Record<SyncRequestType, () => Promise<void>> = {
       // deprecated handlers
@@ -197,17 +254,19 @@ export class SyncService extends BaseService {
       [SyncRequestType.AuthUsersV2]: () => this.syncAuthUsersV2(options, response, checkpointMap),
       [SyncRequestType.UsersV1]: () => this.syncUsersV1(options, response, checkpointMap),
       [SyncRequestType.PartnersV1]: () => this.syncPartnersV1(options, response, checkpointMap),
-      [SyncRequestType.AssetsV2]: () => this.syncAssetsV2(options, response, checkpointMap),
+      [SyncRequestType.AssetsV2]: () => this.syncAssetsV2(options, response, checkpointMap, auth.audioSupported),
       [SyncRequestType.AssetExifsV1]: () => this.syncAssetExifsV1(options, response, checkpointMap),
       [SyncRequestType.AssetEditsV1]: () => this.syncAssetEditsV1(options, response, checkpointMap),
-      [SyncRequestType.PartnerAssetsV2]: () => this.syncPartnerAssetsV2(options, response, checkpointMap, session.id),
+      [SyncRequestType.PartnerAssetsV2]: () =>
+        this.syncPartnerAssetsV2(options, response, checkpointMap, session.id, auth.audioSupported),
       [SyncRequestType.AssetMetadataV1]: () => this.syncAssetMetadataV1(options, response, checkpointMap, auth),
       [SyncRequestType.PartnerAssetExifsV1]: () =>
         this.syncPartnerAssetExifsV1(options, response, checkpointMap, session.id),
       [SyncRequestType.AlbumsV1]: () => this.syncAlbumsV1(options, response, checkpointMap),
       [SyncRequestType.AlbumsV2]: () => this.syncAlbumsV2(options, response, checkpointMap),
       [SyncRequestType.AlbumUsersV1]: () => this.syncAlbumUsersV1(options, response, checkpointMap, session.id),
-      [SyncRequestType.AlbumAssetsV2]: () => this.syncAlbumAssetsV2(options, response, checkpointMap, session.id),
+      [SyncRequestType.AlbumAssetsV2]: () =>
+        this.syncAlbumAssetsV2(options, response, checkpointMap, session.id, auth.audioSupported),
       [SyncRequestType.AlbumToAssetsV1]: () => this.syncAlbumToAssetsV1(options, response, checkpointMap, session.id),
       [SyncRequestType.AlbumAssetExifsV1]: () =>
         this.syncAlbumAssetExifsV1(options, response, checkpointMap, session.id),
@@ -231,9 +290,24 @@ export class SyncService extends BaseService {
 
       const handler = handlers[type as keyof typeof handlers];
       await handler();
+      if (!AUDIO_SYNC_CHECKPOINTS[type]) {
+        continue;
+      }
+
+      pendingAudioGroups.delete(type);
+      if (audioSupported) {
+        audioGroups.add(type);
+      } else {
+        audioGroups.delete(type);
+      }
     }
 
-    await send(response, { type: SyncEntityType.SyncCompleteV1, ids: [nowId], data: {} });
+    const extraId = toAudioSyncExtraId(audioGroups, pendingAudioGroups);
+    await send(response, {
+      type: SyncEntityType.SyncCompleteV1,
+      ids: extraId ? [nowId, extraId] : [nowId],
+      data: {},
+    });
 
     response.end();
   }
@@ -331,7 +405,12 @@ export class SyncService extends BaseService {
     throw new BadRequestException('SyncRequestType.AssetsV1 is deprecated, use SyncRequestType.AssetsV2 instead');
   }
 
-  private async syncAssetsV2(options: SyncQueryOptions, response: Writable, checkpointMap: CheckpointMap) {
+  private async syncAssetsV2(
+    options: SyncQueryOptions,
+    response: Writable,
+    checkpointMap: CheckpointMap,
+    audioSupported?: boolean,
+  ) {
     const deleteType = SyncEntityType.AssetDeleteV1;
     const deletes = this.syncRepository.asset.getDeletes({ ...options, ack: checkpointMap[deleteType] });
     for await (const { id, ...data } of deletes) {
@@ -341,7 +420,7 @@ export class SyncService extends BaseService {
     const upsertType = SyncEntityType.AssetV2;
     const upserts = this.syncRepository.asset.getUpserts({ ...options, ack: checkpointMap[upsertType] });
     for await (const { updateId, ...data } of upserts) {
-      await send(response, { type: upsertType, ids: [updateId], data: mapSyncAssetV2(data) });
+      await send(response, { type: upsertType, ids: [updateId], data: mapSyncAssetV2(data, audioSupported) });
     }
   }
 
@@ -356,6 +435,7 @@ export class SyncService extends BaseService {
     response: Writable,
     checkpointMap: CheckpointMap,
     sessionId: string,
+    audioSupported?: boolean,
   ) {
     const deleteType = SyncEntityType.PartnerAssetDeleteV1;
     const deletes = this.syncRepository.partnerAsset.getDeletes({ ...options, ack: checkpointMap[deleteType] });
@@ -390,7 +470,7 @@ export class SyncService extends BaseService {
           await send(response, {
             type: backfillType,
             ids: [createId, updateId],
-            data: mapSyncAssetV2(data),
+            data: mapSyncAssetV2(data, audioSupported),
           });
         }
 
@@ -406,7 +486,7 @@ export class SyncService extends BaseService {
 
     const upserts = this.syncRepository.partnerAsset.getUpserts({ ...options, ack: checkpointMap[upsertType] });
     for await (const { updateId, ...data } of upserts) {
-      await send(response, { type: upsertType, ids: [updateId], data: mapSyncAssetV2(data) });
+      await send(response, { type: upsertType, ids: [updateId], data: mapSyncAssetV2(data, audioSupported) });
     }
   }
 
@@ -588,6 +668,7 @@ export class SyncService extends BaseService {
     response: Writable,
     checkpointMap: CheckpointMap,
     sessionId: string,
+    audioSupported?: boolean,
   ) {
     const backfillType = SyncEntityType.AlbumAssetBackfillV2;
     const backfillCheckpoint = checkpointMap[backfillType];
@@ -616,7 +697,11 @@ export class SyncService extends BaseService {
         );
 
         for await (const { updateId, ...data } of backfill) {
-          await send(response, { type: backfillType, ids: [createId, updateId], data: mapSyncAssetV2(data) });
+          await send(response, {
+            type: backfillType,
+            ids: [createId, updateId],
+            data: mapSyncAssetV2(data, audioSupported),
+          });
         }
 
         await sendEntityBackfillCompleteAck(response, backfillType, createId);
@@ -635,7 +720,7 @@ export class SyncService extends BaseService {
         createCheckpoint,
       );
       for await (const { updateId, ...data } of updates) {
-        await send(response, { type: updateType, ids: [updateId], data: mapSyncAssetV2(data) });
+        await send(response, { type: updateType, ids: [updateId], data: mapSyncAssetV2(data, audioSupported) });
       }
     }
 
@@ -651,7 +736,7 @@ export class SyncService extends BaseService {
         });
         isFirst = false;
       }
-      await send(response, { type: createType, ids: [updateId], data: mapSyncAssetV2(data) });
+      await send(response, { type: createType, ids: [updateId], data: mapSyncAssetV2(data, audioSupported) });
     }
   }
 

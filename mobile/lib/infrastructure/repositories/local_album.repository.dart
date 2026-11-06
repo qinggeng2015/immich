@@ -65,19 +65,30 @@ class LocalAlbumRepository extends DatabaseAccessor<Drift> with $LocalAlbumRepos
   }
 
   Future<void> deleteAlbum(String albumId) => transaction(() async {
-    // Remove all assets that are only in this particular album
-    // We cannot remove all assets in the album because they might be in other albums in iOS
-    // That is not the case on Android since asset <-> album has one:one mapping
-    final assetsToDelete = CurrentPlatform.isIOS ? await _getUniqueAssetsInAlbum(albumId) : await getAssetIds(albumId);
-    await _deleteAssets(assetsToDelete);
+    if (CurrentPlatform.isAndroid && albumId.startsWith('saf-folder:')) {
+      await _removeAssets(albumId, await getAssetIds(albumId));
+    } else {
+      final assetsToDelete = CurrentPlatform.isIOS
+          ? await _getUniqueAssetsInAlbum(albumId)
+          : await getAssetIds(albumId);
+      await _deleteAssets(assetsToDelete);
+    }
 
     await _db.managers.localAlbumEntity
         .filter((a) => a.id.equals(albumId) & a.backupSelection.equals(BackupSelection.none))
         .delete();
   });
 
+  Future<void> removeLegacyAudioAlbum() => transaction(() async {
+    const albumId = 'immich-audio';
+    final orphanedAssets = await _getUniqueAssetsInAlbum(albumId);
+    await _db.localAlbumEntity.deleteWhere((row) => row.id.equals(albumId));
+    await _deleteAssets(orphanedAssets);
+  });
+
   Future<void> syncDeletes(String albumId, Iterable<String> assetIdsToKeep) async {
-    if (assetIdsToKeep.isEmpty) {
+    final isDirectory = CurrentPlatform.isAndroid && albumId.startsWith('saf-folder:');
+    if (assetIdsToKeep.isEmpty && !isDirectory) {
       return Future.value();
     }
 
@@ -96,17 +107,16 @@ class LocalAlbumRepository extends DatabaseAccessor<Drift> with $LocalAlbumRepos
         }
       });
 
-      final query = _db.localAssetEntity.delete()
-        ..where(
-          (row) => row.id.isInQuery(
-            _db.localAlbumAssetEntity.selectOnly()
-              ..addColumns([_db.localAlbumAssetEntity.assetId])
-              ..where(
-                _db.localAlbumAssetEntity.albumId.equals(albumId) & _db.localAlbumAssetEntity.marker_.isNotNull(),
-              ),
-          ),
-        );
-      await query.go();
+      final staleAssets = _db.localAlbumAssetEntity.selectOnly()
+        ..addColumns([_db.localAlbumAssetEntity.assetId])
+        ..where(_db.localAlbumAssetEntity.albumId.equals(albumId) & _db.localAlbumAssetEntity.marker_.isNotNull());
+      if (isDirectory) {
+        final assetIds = await staleAssets.map((row) => row.read(_db.localAlbumAssetEntity.assetId)!).get();
+        await _removeAssets(albumId, assetIds);
+      } else {
+        final query = _db.localAssetEntity.delete()..where((row) => row.id.isInQuery(staleAssets));
+        await query.go();
+      }
     });
   }
 
@@ -168,9 +178,13 @@ class LocalAlbumRepository extends DatabaseAccessor<Drift> with $LocalAlbumRepos
       });
 
       if (CurrentPlatform.isAndroid) {
-        // On Android, an asset can only be in one album
-        // So, get the albums that are marked for deletion
-        // and delete all the assets that are in those albums
+        final missingDirectories = _db.localAlbumEntity.selectOnly()
+          ..addColumns([_db.localAlbumEntity.id])
+          ..where(_db.localAlbumEntity.marker_.isNotNull() & _db.localAlbumEntity.id.like('saf-folder:%'));
+        final directoryIds = await missingDirectories.map((row) => row.read(_db.localAlbumEntity.id)!).get();
+        for (final albumId in directoryIds) {
+          await _removeAssets(albumId, await getAssetIds(albumId));
+        }
         final deleteSmt = _db.localAssetEntity.delete();
         deleteSmt.where((localAsset) {
           final subQuery = _db.localAlbumAssetEntity.selectOnly()
@@ -178,7 +192,7 @@ class LocalAlbumRepository extends DatabaseAccessor<Drift> with $LocalAlbumRepos
             ..join([
               innerJoin(_db.localAlbumEntity, _db.localAlbumAssetEntity.albumId.equalsExp(_db.localAlbumEntity.id)),
             ]);
-          subQuery.where(_db.localAlbumEntity.marker_.isNotNull());
+          subQuery.where(_db.localAlbumEntity.marker_.isNotNull() & _db.localAlbumEntity.id.like('saf-folder:%').not());
           return localAsset.id.isInQuery(subQuery);
         });
         await deleteSmt.go();
@@ -370,6 +384,16 @@ class LocalAlbumRepository extends DatabaseAccessor<Drift> with $LocalAlbumRepos
     }
 
     if (CurrentPlatform.isAndroid) {
+      if (albumId.startsWith('saf-folder:')) {
+        return _db.batch((batch) {
+          for (final assetId in assetIds) {
+            batch.deleteWhere(
+              _db.localAlbumAssetEntity,
+              (row) => row.assetId.equals(assetId) & row.albumId.equals(albumId),
+            );
+          }
+        });
+      }
       return _deleteAssets(assetIds);
     }
 
@@ -406,6 +430,23 @@ class LocalAlbumRepository extends DatabaseAccessor<Drift> with $LocalAlbumRepos
 
       await _deleteAssets(assetsToDelete);
     });
+  }
+
+  Future<void> removeOrphanedDirectoryAssets() async {
+    if (!CurrentPlatform.isAndroid) {
+      return;
+    }
+    final query = _db.localAssetEntity.delete()
+      ..where(
+        (asset) =>
+            asset.id.like('saf-file:%') &
+            notExistsQuery(
+              _db.localAlbumAssetEntity.selectOnly()
+                ..addColumns([_db.localAlbumAssetEntity.assetId])
+                ..where(_db.localAlbumAssetEntity.assetId.equalsExp(asset.id)),
+            ),
+      );
+    await query.go();
   }
 
   /// Get all asset ids that are only in this album and not in other albums.

@@ -5,6 +5,7 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/constants/enums.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
+import 'package:immich_mobile/presentation/widgets/asset_viewer/audio_cover.widget.dart';
 import 'package:immich_mobile/presentation/widgets/asset_viewer/video_viewer.widget.dart';
 import 'package:immich_mobile/presentation/widgets/images/image_provider.dart';
 import 'package:immich_mobile/presentation/widgets/images/progressive_image.widget.dart';
@@ -25,6 +26,8 @@ class SlideshowSlide extends StatelessWidget {
 
   final bool isCurrent;
   final bool frozen;
+  final bool playing;
+  final VoidCallback? onTogglePlayback;
 
   final VoidCallback onTapUp;
   final VoidCallback onCompleted;
@@ -38,6 +41,8 @@ class SlideshowSlide extends StatelessWidget {
     required this.isCurrent,
     required this.onTapUp,
     required this.onCompleted,
+    this.playing = true,
+    this.onTogglePlayback,
   }) : frozen = false;
 
   /// A static slide frozen at a given zoom level for use transitions
@@ -45,6 +50,8 @@ class SlideshowSlide extends StatelessWidget {
     : zoom = AlwaysStoppedAnimation(zoom),
       isCurrent = false,
       frozen = true,
+      playing = false,
+      onTogglePlayback = null,
       onTapUp = _noop,
       onCompleted = _noop;
 
@@ -53,6 +60,19 @@ class SlideshowSlide extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (asset.isAudio) {
+      return frozen
+          ? AudioCover(asset: asset, showName: true)
+          : _SlideshowAudio(
+              asset: asset,
+              isCurrent: isCurrent,
+              playing: playing,
+              onTogglePlayback: onTogglePlayback,
+              onTapUp: onTapUp,
+              onCompleted: onCompleted,
+            );
+    }
+
     final Widget content = asset.isImage || frozen
         ? ScaleTransition(
             scale: zoom.drive(Tween(begin: 1.0, end: 1.0 + _kenBurnsZoomMultiplier)),
@@ -154,6 +174,54 @@ class _SlideshowVideo extends ConsumerWidget {
         image: ProgressiveImage(
           provider: imageProvider,
           builder: (context, provider) => Image(image: provider, fit: BoxFit.contain, alignment: Alignment.center),
+        ),
+      ),
+    );
+  }
+}
+
+class _SlideshowAudio extends ConsumerWidget {
+  final BaseAsset asset;
+  final bool isCurrent;
+  final bool playing;
+  final VoidCallback? onTogglePlayback;
+  final VoidCallback onTapUp;
+  final VoidCallback onCompleted;
+
+  const _SlideshowAudio({
+    required this.asset,
+    required this.isCurrent,
+    required this.playing,
+    required this.onTogglePlayback,
+    required this.onTapUp,
+    required this.onCompleted,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.listen(videoPlayerProvider(asset.id).select((state) => state.status), (_, status) {
+      if (isCurrent &&
+          status == VideoPlaybackStatus.completed &&
+          ref.read(videoPlayerProvider(asset.id)).position > Duration.zero) {
+        onCompleted();
+      }
+    });
+
+    return GestureDetector(
+      onTap: onTapUp,
+      child: NativeVideoViewer(
+        asset: asset,
+        isCurrent: isCurrent,
+        loopOverride: false,
+        autoPlayOverride: playing,
+        image: AudioCover(
+          asset: asset,
+          showName: true,
+          isPlaying: playing,
+          durationOverride: ref.watch(videoPlayerProvider(asset.id).select((state) => state.duration)),
+          onPressed: isCurrent
+              ? onTogglePlayback ?? () => ref.read(videoPlayerProvider(asset.id).notifier).toggle()
+              : null,
         ),
       ),
     );

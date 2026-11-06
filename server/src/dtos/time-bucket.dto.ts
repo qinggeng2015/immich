@@ -87,6 +87,7 @@ const TimeBucketAssetResponseSchema = z
       .describe('Array of visibility statuses for each asset (e.g., ARCHIVE, TIMELINE, HIDDEN, LOCKED)'),
     isTrashed: z.array(z.boolean()).describe('Array indicating whether each asset is in the trash'),
     isImage: z.array(z.boolean()).describe('Array indicating whether each asset is an image (false for videos)'),
+    isAudio: z.array(z.boolean()).optional().describe('Array indicating whether each asset is audio'),
     thumbhash: z
       .array(z.string().nullable())
       .describe('Array of BlurHash strings for generating asset previews (base64 encoded)'),

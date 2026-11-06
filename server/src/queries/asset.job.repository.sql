@@ -475,6 +475,7 @@ where
   "asset"."deletedAt" is null
   and "asset"."visibility" in ('archive', 'timeline')
   and "job_status"."duplicatesDetectedAt" is null
+  and "asset"."type" in ($1, $2)
 
 -- AssetJobRepository.streamForEncodeClip
 select
@@ -500,11 +501,13 @@ where
     where
       "assetId" = "asset"."id"
   )
+  and "asset"."type" in ($3, $4)
 
 -- AssetJobRepository.getForClipEncoding
 select
   "asset"."id",
   "asset"."visibility",
+  "asset"."type",
   (
     select
       coalesce(json_agg(agg), '[]')
@@ -531,6 +534,7 @@ where
 select
   "asset"."id",
   "asset"."visibility",
+  "asset"."type",
   (
     select
       to_json(obj)
@@ -617,6 +621,7 @@ where
 select
   "asset"."ownerId",
   "asset"."visibility",
+  "asset"."type",
   (
     select
       "asset_file"."path"
@@ -631,6 +636,64 @@ from
   "asset"
 where
   "asset"."id" = $1
+
+-- AssetJobRepository.getForAudioAnalysis
+select
+  "asset"."id",
+  "asset"."ownerId",
+  "asset"."type",
+  "asset"."visibility",
+  "asset"."originalPath",
+  "asset"."checksum",
+  "asset"."fileModifiedAt",
+  "asset"."deletedAt",
+  "asset"."isOffline"
+from
+  "asset"
+where
+  "asset"."id" = $1
+
+-- AssetJobRepository.streamForAudioAnalysis
+select
+  "asset"."id"
+from
+  "asset"
+  left join "asset_audio_analysis" on "asset_audio_analysis"."assetId" = "asset"."id"
+where
+  "asset"."type" = $1
+  and "asset"."deletedAt" is null
+  and "asset"."isOffline" = $2
+  and "asset"."visibility" != $3
+  and (
+    "asset_audio_analysis"."waveform" is null
+    or "asset_audio_analysis"."waveformChecksum" is distinct from "asset"."checksum"
+    or "asset_audio_analysis"."waveformSourceModifiedAt" is distinct from "asset"."fileModifiedAt"
+  )
+
+-- AssetJobRepository.streamForAudioSummary
+select
+  "asset"."id"
+from
+  "asset"
+  inner join "asset_audio_analysis" on "asset_audio_analysis"."assetId" = "asset"."id"
+where
+  "asset"."type" = $1
+  and "asset"."deletedAt" is null
+  and "asset"."isOffline" = $2
+  and "asset"."visibility" != $3
+  and "asset_audio_analysis"."transcript" is not null
+  and trim(
+    coalesce(asset_audio_analysis.transcript ->> 'text', '')
+  ) != $4
+  and "asset_audio_analysis"."transcriptChecksum" = "asset"."checksum"
+  and "asset_audio_analysis"."transcriptSourceModifiedAt" = "asset"."fileModifiedAt"
+  and (
+    "asset_audio_analysis"."summary" is null
+    or "asset_audio_analysis"."summaryChecksum" is distinct from "asset"."checksum"
+    or "asset_audio_analysis"."summarySourceModifiedAt" is distinct from "asset"."fileModifiedAt"
+    or "asset_audio_analysis"."summaryTranscriptRevision" is distinct from "asset_audio_analysis"."transcriptRevision"
+    or "asset_audio_analysis"."summaryConfigHash" is distinct from $5
+  )
 
 -- AssetJobRepository.getForSyncAssets
 select
@@ -709,7 +772,7 @@ select
 from
   "asset"
 where
-  "asset"."type" = 'VIDEO'
+  "asset"."type" in ($1, $2)
   and not exists (
     select
       "asset_file"."id"
@@ -726,6 +789,7 @@ select
   "asset"."id",
   "asset"."ownerId",
   "asset"."originalPath",
+  "asset"."type",
   (
     select
       coalesce(json_agg(agg), '[]')
@@ -821,11 +885,11 @@ select
 from
   "asset"
   inner join "asset_exif" on "asset"."id" = "asset_exif"."assetId"
-  inner join "asset_video" on "asset_video"."assetId" = "asset"."id"
+  left join "asset_video" on "asset_video"."assetId" = "asset"."id"
   left join "asset_audio" on "asset_audio"."assetId" = "asset"."id"
 where
   "asset"."id" = $1
-  and "asset"."type" = 'VIDEO'
+  and "asset"."type" in ($2, $3)
 
 -- AssetJobRepository.streamForMetadataExtraction
 select
@@ -964,6 +1028,7 @@ where
       "assetId" = "asset"."id"
       and "asset_file"."type" = $2
   )
+  and "asset"."type" in ($3, $4)
 order by
   "asset"."fileCreatedAt" desc
 
@@ -977,6 +1042,7 @@ where
   "asset_job_status"."ocrAt" is null
   and "asset"."deletedAt" is null
   and "asset"."visibility" != $1
+  and "asset"."type" in ($2, $3)
 
 -- AssetJobRepository.streamForMigrationJob
 select

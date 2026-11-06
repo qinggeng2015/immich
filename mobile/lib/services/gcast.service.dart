@@ -133,7 +133,7 @@ class GCastService {
   }
 
   Future<void> loadMedia(RemoteAsset asset, bool reload) async {
-    if (!isConnected) {
+    if (!isConnected || asset.isAudio) {
       return;
     } else if (asset.id == currentAssetId && !reload) {
       return;

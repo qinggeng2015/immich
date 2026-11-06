@@ -258,6 +258,8 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage>
       isCurrent: _slideshow.currentIndex == index,
       onTapUp: _onTapUp,
       onCompleted: _slideshow.didCompleteVideo,
+      playing: !_slideshow.paused,
+      onTogglePlayback: () => _slideshow.paused ? _slideshow.resume() : _slideshow.pause(),
     );
   }
 

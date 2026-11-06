@@ -11,6 +11,8 @@ import 'package:immich_mobile/domain/models/config/slideshow_config.dart';
 import 'package:immich_mobile/domain/models/timeline.model.dart';
 import 'package:immich_mobile/domain/services/timeline.service.dart';
 import 'package:immich_mobile/presentation/pages/slideshow.page.dart';
+import 'package:immich_mobile/presentation/widgets/asset_viewer/audio_cover.widget.dart';
+import 'package:immich_mobile/presentation/widgets/asset_viewer/video_viewer.widget.dart';
 import 'package:immich_mobile/presentation/widgets/slideshow/slideshow_controller.dart';
 import 'package:immich_mobile/presentation/widgets/slideshow/slideshow_slide.widget.dart';
 import 'package:immich_mobile/providers/asset_viewer/video_player_provider.dart';
@@ -294,6 +296,106 @@ void main() {
 
       await tester.pump(slideDuration * 0.35);
       expect(progressIndicatorProgress(tester), closeTo(0.35, 0.01));
+    });
+  });
+
+  group('audio slides', () {
+    final audio = RemoteAssetFactory.create(type: .audio, name: 'recording.flac');
+    late FakeVideoPlayer player;
+    final playing = [videoPlayerProvider(audio.id).overrideWith((ref) => player)];
+
+    TimelineService withAudio() => timelineOf([audio, ...images(1)]);
+
+    setUp(() => player = FakeVideoPlayer());
+
+    slideshowTest(
+      'audio starts playback and exposes an operable cover without loading an image',
+      (tester) async {
+        final viewer = tester.widget<NativeVideoViewer>(find.byType(NativeVideoViewer));
+        final cover = tester.widget<AudioCover>(find.byType(AudioCover));
+        expect(viewer.autoPlayOverride, isTrue);
+        expect(viewer.loopOverride, isFalse);
+        expect(cover.onPressed, isNotNull);
+        expect(cover.isPlaying, isTrue);
+        expect(progressIndicatorProgress(tester), isNull);
+        expect(tester.takeException(), isNull);
+      },
+      timeline: withAudio,
+      overrides: playing,
+    );
+
+    slideshowTest(
+      'audio cover pauses and resumes both playback and the slideshow timer',
+      (tester) async {
+        await tester.tap(find.byIcon(Icons.pause_circle_outline_rounded));
+        await tester.pump();
+        expect(player.calls, contains('pause'));
+        expect(tester.widget<NativeVideoViewer>(find.byType(NativeVideoViewer)).autoPlayOverride, isFalse);
+
+        await tester.pump(slideDuration * 2);
+        expect(visibleIndex(tester), 0);
+
+        await tester.tap(find.byIcon(Icons.play_circle_outline_rounded));
+        await tester.pump();
+        expect(player.calls, contains('play'));
+        expect(tester.widget<NativeVideoViewer>(find.byType(NativeVideoViewer)).autoPlayOverride, isTrue);
+      },
+      timeline: withAudio,
+      overrides: playing,
+    );
+
+    slideshowTest(
+      'audio completion advances immediately to the next slide',
+      (tester) async {
+        player.emit(
+          const VideoPlayerState(
+            position: Duration(seconds: 2),
+            duration: Duration(seconds: 2),
+            status: VideoPlaybackStatus.completed,
+          ),
+        );
+        await tester.pump();
+        await tester.pump();
+        expect(visibleIndex(tester), 1);
+      },
+      timeline: withAudio,
+      overrides: playing,
+    );
+
+    slideshowTest(
+      'stalled audio advances after the watchdog timeout instead of hanging',
+      (tester) async {
+        await tester.pump(slideDuration + tick);
+        await tester.pump();
+        expect(visibleIndex(tester), 1);
+      },
+      timeline: withAudio,
+      overrides: playing,
+    );
+
+    slideshowTest(
+      'playing audio remains visible and uses the loaded duration for progress',
+      (tester) async {
+        player.emit(
+          const VideoPlayerState(
+            position: Duration(seconds: 2),
+            duration: Duration(seconds: 4),
+            status: VideoPlaybackStatus.playing,
+          ),
+        );
+        await tester.pump(slideDuration + tick);
+        expect(visibleIndex(tester), 0);
+        expect(progressIndicatorProgress(tester), 0.5);
+      },
+      timeline: withAudio,
+      overrides: playing,
+    );
+
+    testWidgets('frozen audio transitions show a cover without starting a second player', (tester) async {
+      await tester.pumpTestWidget(ctx, SlideshowSlide.frozen(asset: audio, index: 0, look: .contain, zoom: 0));
+      expect(find.byType(AudioCover), findsOneWidget);
+      expect(find.byType(NativeVideoViewer), findsNothing);
+      expect(tester.widget<AudioCover>(find.byType(AudioCover)).onPressed, isNull);
     });
   });
 

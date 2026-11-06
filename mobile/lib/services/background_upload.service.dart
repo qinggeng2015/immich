@@ -13,6 +13,7 @@ import 'package:immich_mobile/domain/models/store.model.dart';
 import 'package:immich_mobile/domain/services/asset.service.dart';
 import 'package:immich_mobile/entities/store.entity.dart';
 import 'package:immich_mobile/extensions/platform_extensions.dart';
+import 'package:immich_mobile/infrastructure/repositories/audio_support.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/backup.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/local_asset.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/settings.repository.dart';
@@ -23,6 +24,7 @@ import 'package:immich_mobile/providers/infrastructure/storage.provider.dart';
 import 'package:immich_mobile/repositories/asset_media.repository.dart';
 import 'package:immich_mobile/repositories/upload.repository.dart';
 import 'package:immich_mobile/services/api.service.dart';
+import 'package:immich_mobile/services/server_info.service.dart';
 import 'package:immich_mobile/utils/debug_print.dart';
 import 'package:logging/logging.dart';
 import 'package:openapi/api.dart' as api;
@@ -39,6 +41,7 @@ final backgroundUploadServiceProvider = Provider((ref) {
     db.backupRepository,
     ref.watch(assetMediaRepositoryProvider),
     ref.watch(assetServiceProvider),
+    audioSupport: AudioSupportRepository(ref.watch(serverInfoServiceProvider)),
   );
 
   ref.onDispose(service.dispose);
@@ -92,11 +95,16 @@ class BackgroundUploadService {
     this._localAssetRepository,
     this._backupRepository,
     this._assetMediaRepository,
-    this._assetService,
-  ) {
+    this._assetService, {
+    this._audioSupport,
+  }) {
     _uploadRepository.onUploadStatus = _onUploadCallback;
     _uploadRepository.onTaskProgress = _onTaskProgressCallback;
   }
+
+  final AudioSupportRepository? _audioSupport;
+
+  Future<bool> _supportsAudio() async => await _audioSupport?.isSupported() ?? false;
 
   final UploadRepository _uploadRepository;
   final StorageRepository _storageRepository;
@@ -136,6 +144,9 @@ class BackgroundUploadService {
 
   /// Enqueue tasks to the background upload queue
   Future<List<bool>> enqueueTasks(List<UploadTask> tasks) {
+    if (shouldAbortQueuingTasks) {
+      return Future.value(List.filled(tasks.length, false));
+    }
     return _uploadRepository.enqueueBackgroundAll(tasks);
   }
 
@@ -152,7 +163,7 @@ class BackgroundUploadService {
     await _storageRepository.clearCache();
     shouldAbortQueuingTasks = false;
 
-    final candidates = await _backupRepository.getCandidates(userId);
+    final candidates = await _backupRepository.getCandidates(userId, includeAudio: await _supportsAudio());
     if (candidates.isEmpty) {
       _logger.info("No new backup candidates found, finishing background upload");
       return;
@@ -165,6 +176,9 @@ class BackgroundUploadService {
     final List<UploadTask> tasks = [];
 
     for (final asset in batch) {
+      if (shouldAbortQueuingTasks) {
+        break;
+      }
       final task = await getUploadTask(asset);
       if (task != null) {
         tasks.add(task);
@@ -183,14 +197,45 @@ class BackgroundUploadService {
   Future<int> cancel() async {
     shouldAbortQueuingTasks = true;
 
-    await _storageRepository.clearCache();
     await _uploadRepository.reset(kBackupGroup);
     await _uploadRepository.deleteDatabaseRecords(kBackupGroup);
     await _uploadRepository.reset(kBackupLivePhotoGroup);
     await _uploadRepository.deleteDatabaseRecords(kBackupLivePhotoGroup);
+    await _storageRepository.clearCache();
 
     final activeTasks = await _uploadRepository.getActiveTasks(kBackupGroup);
     return activeTasks.length;
+  }
+
+  Future<void> cancelAudioFolderUploads(String albumId, Iterable<String> assetIds) async {
+    if (!albumId.startsWith('audio-folder:')) {
+      return;
+    }
+
+    shouldAbortQueuingTasks = true;
+    final selectedIds = assetIds.toSet();
+    final assetPrefix = 'audio-file:${albumId.substring('audio-folder:'.length)}:';
+    final tasks = (await _uploadRepository.getActiveTasks(
+      kBackupGroup,
+    )).where((task) => selectedIds.contains(task.taskId) || task.taskId.startsWith(assetPrefix)).toList();
+    if (tasks.isEmpty) {
+      return;
+    }
+
+    if (!await _uploadRepository.cancelBackgroundTasks(tasks.map((task) => task.taskId).toList())) {
+      throw StateError('Failed to cancel audio folder uploads');
+    }
+
+    for (final task in tasks) {
+      try {
+        final file = File(await task.filePath());
+        if (file.existsSync()) {
+          await file.delete();
+        }
+      } catch (error) {
+        _logger.warning('Failed to delete cancelled audio upload copy', error);
+      }
+    }
   }
 
   /// Resume background backup processing
@@ -204,13 +249,17 @@ class BackgroundUploadService {
         unawaited(_handleLivePhoto(update));
         unawaited(_stackEditedAsset(update));
 
-        if (CurrentPlatform.isIOS) {
-          try {
+        try {
+          final isSelectedDirectoryFile =
+              CurrentPlatform.isAndroid &&
+              update.task.metaData.isNotEmpty &&
+              UploadTaskMetadata.fromJson(update.task.metaData).localAssetId.startsWith('saf-file:');
+          if (CurrentPlatform.isIOS || isSelectedDirectoryFile) {
             final path = await update.task.filePath();
             await File(path).delete();
-          } catch (e) {
-            _logger.severe('Error deleting file path for iOS: $e');
           }
+        } catch (e) {
+          _logger.severe('Error deleting staged upload file: $e');
         }
 
       default:
@@ -275,8 +324,13 @@ class BackgroundUploadService {
 
   @visibleForTesting
   Future<UploadTask?> getUploadTask(LocalAsset asset, {String group = kBackupGroup, int? priority}) async {
-    final entity = await _storageRepository.getAssetEntityForAsset(asset);
-    if (entity == null) {
+    if (asset.isAudio && !await _supportsAudio()) {
+      return null;
+    }
+    final requiresMediaEntity = !asset.isAudio && !asset.id.startsWith('saf-file:');
+    final entity = requiresMediaEntity ? await _storageRepository.getAssetEntityForAsset(asset) : null;
+    final isLivePhoto = entity?.isLivePhoto ?? false;
+    if (entity == null && requiresMediaEntity) {
       _logger.warning("Asset entity not found for ${asset.id} - ${asset.name}");
       return null;
     }
@@ -290,7 +344,7 @@ class BackgroundUploadService {
     /// We implement two separate upload groups for this, the normal one for the video file
     /// and the higher priority group for the photo file because the video file is already uploaded.
 
-    if (entity.isLivePhoto) {
+    if (isLivePhoto) {
       file = await _storageRepository.getMotionFileForAsset(asset);
     } else {
       file = await _storageRepository.getFileForAsset(asset.id);
@@ -301,14 +355,14 @@ class BackgroundUploadService {
       return null;
     }
 
-    final fileName = await _assetMediaRepository.getOriginalFilename(asset.id) ?? asset.name;
+    final fileName = (asset.isAudio ? null : await _assetMediaRepository.getOriginalFilename(asset.id)) ?? asset.name;
     // Some apps (e.g. DJI/Fusion) return names without an extension; fall back to the asset name for those.
     final extension = p.extension(file.path).isNotEmpty ? p.extension(file.path) : p.extension(asset.name);
     final originalFileName = p.setExtension(fileName, extension);
 
     final String metadata = UploadTaskMetadata(
       localAssetId: asset.id,
-      isLivePhotos: entity.isLivePhoto,
+      isLivePhotos: isLivePhoto,
       livePhotoVideoId: '',
       checksum: asset.checksum,
     ).toJson();
@@ -327,11 +381,15 @@ class BackgroundUploadService {
       isFavorite: asset.isFavorite,
       requiresWiFi: requiresWiFi,
       // Visibility hidden on upload to prevent the server from running regular jobs on the live photo asset
-      fields: entity.isLivePhoto ? {'visibility': api.AssetVisibility.hidden.toString()} : null,
-      cloudId: entity.isLivePhoto ? null : asset.cloudId,
-      adjustmentTime: entity.isLivePhoto ? null : asset.adjustmentTime?.toIso8601String(),
-      latitude: entity.isLivePhoto ? null : asset.latitude?.toString(),
-      longitude: entity.isLivePhoto ? null : asset.longitude?.toString(),
+      fields: isLivePhoto
+          ? {'visibility': api.AssetVisibility.hidden.toString()}
+          : asset.isAudio
+          ? {'duration': (asset.durationMs ?? 0).toString()}
+          : null,
+      cloudId: isLivePhoto ? null : asset.cloudId,
+      adjustmentTime: isLivePhoto ? null : asset.adjustmentTime?.toIso8601String(),
+      latitude: isLivePhoto ? null : asset.latitude?.toString(),
+      longitude: isLivePhoto ? null : asset.longitude?.toString(),
     );
   }
 
@@ -381,7 +439,10 @@ class BackgroundUploadService {
     if (asset.isVideo && backup.useCellularForVideos) {
       return false;
     }
-    if (!asset.isVideo && backup.useCellularForPhotos) {
+    if (asset.isImage && backup.useCellularForPhotos) {
+      return false;
+    }
+    if (asset.isAudio && backup.useCellularForAudio) {
       return false;
     }
     return true;

@@ -17,6 +17,7 @@
   import AssetSelectControlBar from '#lib/components/timeline/AssetSelectControlBar.svelte';
   import { QueryParameter } from '#lib/constants.ts';
   import { assetMultiSelectManager } from '#lib/managers/asset-multi-select-manager.svelte.ts';
+  import { featureFlagsManager } from '#lib/managers/feature-flags-manager.svelte.ts';
   import { searchManager } from '#lib/managers/search-manager.svelte.ts';
   import type { TimelineAsset, Viewport } from '#lib/managers/timeline-manager/types.ts';
   import { Route } from '#lib/route.ts';
@@ -27,16 +28,15 @@
   import { handleError } from '#lib/utils/handle-error.ts';
   import { isAlbumsRoute, isPeopleRoute } from '#lib/utils/navigation.ts';
   import { toTimelineAsset } from '#lib/utils/timeline-util.ts';
+  import { normalizeAudioSearchQuery, type SearchQuery } from '#lib/utils/search.ts';
   import {
     type AlbumResponseDto,
     type AssetResponseDto,
     AssetVisibility,
     getPerson,
     getTagById,
-    type MetadataSearchDto,
     searchAssets,
     searchSmart,
-    type SmartSearchDto,
   } from '@immich/sdk';
   import { ActionButton, CommandPaletteDefaultProvider, Icon, IconButton, LoadingSpinner } from '@immich/ui';
   import { mdiArrowLeft, mdiClose, mdiDotsVertical, mdiImageOffOutline, mdiSelectAll } from '@mdi/js';
@@ -63,9 +63,15 @@
   let scrollY = $state(0);
   let scrollYHistory = 0;
 
-  type SearchTerms = MetadataSearchDto & Pick<SmartSearchDto, 'query' | 'queryAssetId'>;
+  type SearchTerms = SearchQuery;
   let searchQuery = $derived(page.url.searchParams.get(QueryParameter.QUERY));
-  let terms = $derived<SearchTerms>(searchQuery ? JSON.parse(searchQuery) : {});
+  let terms = $derived<SearchTerms>(
+    normalizeAudioSearchQuery(
+      searchQuery ? JSON.parse(searchQuery) : {},
+      featureFlagsManager.supportsAudio,
+      featureFlagsManager.supportsSpeechToText,
+    ),
+  );
   let searchTermKeys = $derived(getObjectKeys(terms));
 
   $effect(() => {
@@ -194,6 +200,7 @@
       description: $t('description'),
       queryAssetId: $t('query_asset_id'),
       ocr: $t('ocr'),
+      transcript: $t('audio_transcript'),
     };
     return keyMap[key] || key;
   }

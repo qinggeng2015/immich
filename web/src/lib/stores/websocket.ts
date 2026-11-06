@@ -50,6 +50,7 @@ export interface Events {
 
 const websocket: Socket<Events> = io({
   path: '/api/socket.io',
+  auth: { features: 'audio,audio-analysis,audio-summary' },
   transports: ['websocket'],
   reconnection: true,
   forceNew: true,

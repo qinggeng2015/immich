@@ -49,6 +49,17 @@ describe('Thumbnail component', () => {
     expect(tabbables.length).toBe(0);
   });
 
+  it('renders an audio cover without loading an image or video', () => {
+    const asset = factory.timelineAsset({ isAudio: true, isImage: false, isVideo: false, duration: 125_000 });
+    const { getByRole, getByText, container } = render(Thumbnail, { asset });
+
+    expect(getByRole('img', { name: 'audio_alt_text_date' })).toBeTruthy();
+    expect(getByText('2:05')).toBeTruthy();
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('video')).toBeNull();
+    expect(container.querySelector('audio')).toBeNull();
+  });
+
   it('shows thumbhash while image is loading', () => {
     const asset = factory.asset({ originalPath: 'image.jpg', originalMimeType: 'image/jpeg' });
     const sut = render(Thumbnail, {

@@ -166,6 +166,8 @@ export type AdminConfigJobSettingsDto = {
     concurrency: number;
 };
 export type AdminConfigJobDto = {
+    audioSummary?: AdminConfigJobSettingsDto;
+    audioWaveform?: AdminConfigJobSettingsDto;
     backgroundTask: AdminConfigJobSettingsDto;
     editor: AdminConfigJobSettingsDto;
     faceDetection: AdminConfigJobSettingsDto;
@@ -178,6 +180,7 @@ export type AdminConfigJobDto = {
     search: AdminConfigJobSettingsDto;
     sidecar: AdminConfigJobSettingsDto;
     smartSearch: AdminConfigJobSettingsDto;
+    speechToText?: AdminConfigJobSettingsDto;
     thumbnailGeneration: AdminConfigJobSettingsDto;
     videoConversion: AdminConfigJobSettingsDto;
     workflow: AdminConfigJobSettingsDto;
@@ -200,6 +203,30 @@ export type AdminConfigLoggingDto = {
     /** Enabled */
     enabled: boolean;
     level: LogLevel;
+};
+export type AdminConfigAudioSummaryDto = {
+    /** API key; omitted or empty retains the stored key */
+    apiKey?: string;
+    /** Whether an API key is configured; read only */
+    apiKeyConfigured?: boolean;
+    /** Automatically summarize completed audio transcripts */
+    autoSummarize: boolean;
+    /** OpenAI-compatible API base URL */
+    baseUrl: string;
+    /** Explicitly clear the stored API key */
+    clearApiKey?: boolean;
+    /** Whether the task is enabled */
+    enabled: boolean;
+    /** Maximum output tokens per summary request */
+    maxOutputTokens: number;
+    /** Name of the summary model to use */
+    modelName: string;
+    /** Instructions for summarizing transcripts */
+    prompt: string;
+    /** OpenAI-compatible API protocol */
+    protocol: Protocol;
+    /** Timeout for each summary request in milliseconds */
+    timeoutMs: number;
 };
 export type AdminConfigMachineLearningAvailabilityChecksDto = {
     /** Enabled */
@@ -243,7 +270,18 @@ export type AdminConfigOcrDto = {
     /** Name of the model to use */
     modelName: string;
 };
+export type AdminConfigSpeechToTextDto = {
+    /** Automatically transcribe newly processed audio */
+    autoTranscribe?: boolean;
+    /** Whether the task is enabled */
+    enabled: boolean;
+    /** Speech language or automatic detection */
+    language: Language;
+    /** Name of the model to use */
+    modelName: string;
+};
 export type AdminConfigMachineLearningDto = {
+    audioSummary?: AdminConfigAudioSummaryDto;
     availabilityChecks: AdminConfigMachineLearningAvailabilityChecksDto;
     clip: AdminConfigClipDto;
     duplicateDetection: AdminConfigDuplicateDetectionDto;
@@ -251,6 +289,7 @@ export type AdminConfigMachineLearningDto = {
     enabled: boolean;
     facialRecognition: AdminConfigFacialRecognitionDto;
     ocr: AdminConfigOcrDto;
+    speechToText?: AdminConfigSpeechToTextDto;
     /** ML service URLs */
     urls: string[];
 };
@@ -1379,6 +1418,60 @@ export type UpdateAssetDto = {
     rating?: number | null;
     visibility?: AssetVisibility;
 };
+export type AudioSummaryDto = {
+    /** Model used to generate the summary */
+    modelName: string;
+    /** Generated summary of the transcript */
+    text: string;
+    /** Time the summary was generated */
+    updatedAt: string;
+};
+export type AssetAudioSummaryResponseDto = {
+    /** Summary processing state */
+    status: AudioAnalysisStatus;
+    /** Most recent successful summary for the current transcript */
+    summary: (AudioSummaryDto) | null;
+};
+export type AudioTranscriptSegmentDto = {
+    /** Input audio chunk end in milliseconds */
+    endMs: number;
+    /** Input audio chunk start in milliseconds */
+    startMs: number;
+    /** Recognized text for the chunk */
+    text: string;
+};
+export type AudioTranscriptDto = {
+    /** Detected language, when available */
+    language: string | null;
+    /** Speech recognition model used */
+    modelName: string;
+    /** Segment timestamps mark input chunks rather than word alignment */
+    segmentType: SegmentType;
+    /** Recognized audio chunks in playback order */
+    segments: AudioTranscriptSegmentDto[];
+    /** Full recognized transcript; empty for audio without recognized speech */
+    text: string;
+};
+export type AssetAudioTranscriptResponseDto = {
+    /** Transcription processing state */
+    status: AudioAnalysisStatus;
+    /** Most recent successful transcript, when available */
+    transcript: (AudioTranscriptDto) | null;
+};
+export type AudioWaveformDto = {
+    /** Decoded audio duration in milliseconds */
+    durationMs: number;
+    /** Normalized peak amplitudes across equal time intervals */
+    peaks: number[];
+    /** Waveform data format version */
+    version: Version;
+};
+export type AssetAudioWaveformResponseDto = {
+    /** Waveform processing state */
+    status: AudioAnalysisStatus;
+    /** Most recent successful waveform, when available */
+    waveform: (AudioWaveformDto) | null;
+};
 export type CropParameters = {
     /** Height of the crop */
     height: number;
@@ -1582,6 +1675,12 @@ export type UserConfigImageDto = {
     preview: UserConfigGeneratedImageDto;
     thumbnail: UserConfigGeneratedImageDto;
 };
+export type UserConfigAudioSummaryDto = {
+    /** Automatically summarize completed audio transcripts */
+    autoSummarize: boolean;
+    /** Whether the task is enabled */
+    enabled: boolean;
+};
 export type UserConfigClipDto = {
     /** Whether the task is enabled */
     enabled: boolean;
@@ -1600,13 +1699,21 @@ export type UserConfigOcrDto = {
     /** Whether the task is enabled */
     enabled: boolean;
 };
+export type UserConfigSpeechToTextDto = {
+    /** Automatically transcribe newly processed audio */
+    autoTranscribe?: boolean;
+    /** Whether the task is enabled */
+    enabled: boolean;
+};
 export type UserConfigMachineLearningDto = {
+    audioSummary?: UserConfigAudioSummaryDto;
     clip: UserConfigClipDto;
     duplicateDetection: UserConfigDuplicateDetectionDto;
     /** Enabled */
     enabled: boolean;
     facialRecognition: UserConfigFacialRecognitionDto;
     ocr: UserConfigOcrDto;
+    speechToText?: UserConfigSpeechToTextDto;
 };
 export type UserConfigMapDto = {
     /** Dark map style URL */
@@ -2436,6 +2543,7 @@ export type SearchFilterBranch = {
     state?: StringFilterNullable;
     tagIds?: IdsFilter;
     takenAt?: DateFilter;
+    transcript?: StringSimilarityFilter;
     trashedAt?: DateFilterNullable;
     "type"?: EnumFilterAssetType;
     updatedAt?: DateFilter;
@@ -2471,6 +2579,7 @@ export type SearchFilter = {
     state?: StringFilterNullable;
     tagIds?: IdsFilter;
     takenAt?: DateFilter;
+    transcript?: StringSimilarityFilter;
     trashedAt?: DateFilterNullable;
     "type"?: EnumFilterAssetType;
     updatedAt?: DateFilter;
@@ -2549,6 +2658,8 @@ export type MetadataSearchDto = {
     takenBefore?: string;
     /** Filter by thumbnail file path */
     thumbnailPath?: string;
+    /** Filter by recognized audio speech text */
+    transcript?: string;
     /** Filter by trash date (after) */
     trashedAfter?: string;
     /** Filter by trash date (before) */
@@ -2661,6 +2772,8 @@ export type RandomSearchDto = {
     takenAfter?: string;
     /** Filter by taken date (before) */
     takenBefore?: string;
+    /** Filter by recognized audio speech text */
+    transcript?: string;
     /** Filter by trash date (after) */
     trashedAfter?: string;
     /** Filter by trash date (before) */
@@ -2734,6 +2847,8 @@ export type SmartSearchDto = {
     takenAfter?: string;
     /** Filter by taken date (before) */
     takenBefore?: string;
+    /** Filter by recognized audio speech text */
+    transcript?: string;
     /** Filter by trash date (after) */
     trashedAfter?: string;
     /** Filter by trash date (before) */
@@ -2795,6 +2910,8 @@ export type StatisticsSearchDto = {
     takenAfter?: string;
     /** Filter by taken date (before) */
     takenBefore?: string;
+    /** Filter by recognized audio speech text */
+    transcript?: string;
     /** Filter by trash date (after) */
     trashedAfter?: string;
     /** Filter by trash date (before) */
@@ -2893,6 +3010,12 @@ export type ServerConfigDto = {
     userDeleteDelay: number;
 };
 export type ServerFeaturesDto = {
+    /** Whether audio assets are supported */
+    audio?: boolean;
+    /** Whether audio summary retrieval and generation are supported */
+    audioSummary?: boolean;
+    /** Whether audio waveform retrieval and generation are supported */
+    audioWaveform?: boolean;
     /** Whether the backups feature is enabled */
     backups: boolean;
     /** Whether config file is available */
@@ -2925,6 +3048,8 @@ export type ServerFeaturesDto = {
     sidecar: boolean;
     /** Whether smart search is enabled */
     smartSearch: boolean;
+    /** Whether audio transcription retrieval and generation are supported */
+    speechToText?: boolean;
     /** Whether trash feature is enabled */
     trash: boolean;
 };
@@ -2935,6 +3060,8 @@ export type LicenseKeyDto = {
     licenseKey: string;
 };
 export type ServerMediaTypesResponseDto = {
+    /** Supported audio filename extensions */
+    audio?: string[];
     /** Supported image MIME types */
     image: string[];
     /** Supported sidecar MIME types */
@@ -3235,6 +3362,8 @@ export type TimeBucketAssetResponseDto = {
     fileCreatedAt: string[];
     /** Array of asset IDs in the time bucket */
     id: string[];
+    /** Array indicating whether each asset is audio */
+    isAudio?: boolean[];
     /** Array indicating whether each asset is favorited */
     isFavorite: boolean[];
     /** Array indicating whether each asset is an image (false for videos) */
@@ -4973,6 +5102,50 @@ export function updateAsset({ id, updateAssetDto }: {
         method: "PUT",
         body: updateAssetDto
     })));
+}
+/**
+ * Retrieve an audio summary
+ */
+export function getAssetAudioSummary({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: AssetAudioSummaryResponseDto;
+    }>(`/assets/${encodeURIComponent(id)}/audio/summary`, {
+        ...opts
+    }));
+}
+/**
+ * Retrieve an audio transcript
+ */
+export function getAssetAudioTranscript({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: AssetAudioTranscriptResponseDto;
+    }>(`/assets/${encodeURIComponent(id)}/audio/transcript`, {
+        ...opts
+    }));
+}
+/**
+ * Retrieve an audio waveform
+ */
+export function getAssetAudioWaveform({ id, key, slug }: {
+    id: string;
+    key?: string;
+    slug?: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: AssetAudioWaveformResponseDto;
+    }>(`/assets/${encodeURIComponent(id)}/audio/waveform${QS.query(QS.explode({
+        key,
+        slug
+    }))}`, {
+        ...opts
+    }));
 }
 /**
  * Remove edits from an existing asset
@@ -6738,7 +6911,7 @@ export function getExploreData(opts?: Oazapfts.RequestOpts) {
 /**
  * Search large assets
  */
-export function searchLargeAssets({ albumIds, city, country, createdAfter, createdBefore, isEncoded, isFavorite, isMotion, isNotInAlbum, isOffline, lensModel, libraryId, make, minFileSize, model, ocr, personIds, rating, size, state, tagIds, takenAfter, takenBefore, trashedAfter, trashedBefore, $type, updatedAfter, updatedBefore, visibility, withDeleted, withExif }: {
+export function searchLargeAssets({ albumIds, city, country, createdAfter, createdBefore, isEncoded, isFavorite, isMotion, isNotInAlbum, isOffline, lensModel, libraryId, make, minFileSize, model, ocr, personIds, rating, size, state, tagIds, takenAfter, takenBefore, transcript, trashedAfter, trashedBefore, $type, updatedAfter, updatedBefore, visibility, withDeleted, withExif }: {
     albumIds?: string[];
     city?: string | null;
     country?: string | null;
@@ -6762,6 +6935,7 @@ export function searchLargeAssets({ albumIds, city, country, createdAfter, creat
     tagIds?: string[] | null;
     takenAfter?: string;
     takenBefore?: string;
+    transcript?: string;
     trashedAfter?: string;
     trashedBefore?: string;
     $type?: AssetTypeEnum;
@@ -6798,6 +6972,7 @@ export function searchLargeAssets({ albumIds, city, country, createdAfter, creat
         tagIds,
         takenAfter,
         takenBefore,
+        transcript,
         trashedAfter,
         trashedBefore,
         "type": $type,
@@ -8235,6 +8410,18 @@ export enum LogLevel {
     Error = "error",
     Fatal = "fatal"
 }
+export enum Protocol {
+    ChatCompletions = "chat-completions",
+    Responses = "responses"
+}
+export enum Language {
+    Auto = "auto",
+    Zh = "zh",
+    En = "en",
+    Yue = "yue",
+    Ja = "ja",
+    Ko = "ko"
+}
 export enum ReleaseChannel {
     Stable = "stable",
     ReleaseCandidate = "releaseCandidate"
@@ -8507,6 +8694,9 @@ export enum AssetRejectReason {
     UnsupportedFormat = "unsupported-format"
 }
 export enum AssetJobName {
+    GenerateWaveform = "generate-waveform",
+    TranscribeAudio = "transcribe-audio",
+    SummarizeAudio = "summarize-audio",
     RefreshFaces = "refresh-faces",
     RefreshMetadata = "refresh-metadata",
     RegenerateThumbnail = "regenerate-thumbnail",
@@ -8522,6 +8712,20 @@ export enum AssetTypeEnum {
     Video = "VIDEO",
     Audio = "AUDIO",
     Other = "OTHER"
+}
+export enum AudioAnalysisStatus {
+    Unprocessed = "unprocessed",
+    Pending = "pending",
+    Processing = "processing",
+    Ready = "ready",
+    Failed = "failed",
+    Disabled = "disabled"
+}
+export enum SegmentType {
+    Chunk = "chunk"
+}
+export enum Version {
+    $1 = 1
 }
 export enum AssetEditAction {
     Crop = "crop",
@@ -8561,6 +8765,9 @@ export enum ManualJobName {
     IntegrityChecksumMismatchDeleteAll = "integrity-checksum-mismatch-delete-all"
 }
 export enum QueueName {
+    AudioWaveform = "audioWaveform",
+    SpeechToText = "speechToText",
+    AudioSummary = "audioSummary",
     ThumbnailGeneration = "thumbnailGeneration",
     MetadataExtraction = "metadataExtraction",
     VideoConversion = "videoConversion",
@@ -8625,6 +8832,12 @@ export enum QueueJobStatus {
     Waiting = "waiting"
 }
 export enum JobName {
+    AssetGenerateWaveformQueueAll = "AssetGenerateWaveformQueueAll",
+    AssetGenerateWaveform = "AssetGenerateWaveform",
+    AssetTranscribeQueueAll = "AssetTranscribeQueueAll",
+    AssetTranscribe = "AssetTranscribe",
+    AssetSummarizeQueueAll = "AssetSummarizeQueueAll",
+    AssetSummarize = "AssetSummarize",
     AssetDelete = "AssetDelete",
     AssetDeleteCheck = "AssetDeleteCheck",
     AssetDetectFacesQueueAll = "AssetDetectFacesQueueAll",

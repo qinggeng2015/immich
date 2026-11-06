@@ -55,7 +55,11 @@ class ViewIntentAssetResolver {
     return LocalAsset(
       id: attachment.localAssetId ?? '-${attachment.path!.hashCode.abs()}',
       name: attachment.fileName,
-      type: attachment.isVideo ? AssetType.video : AssetType.image,
+      type: attachment.isAudio
+          ? AssetType.audio
+          : attachment.isVideo
+          ? AssetType.video
+          : AssetType.image,
       createdAt: now,
       updatedAt: now,
       isEdited: false,

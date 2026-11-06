@@ -51,6 +51,7 @@ class SearchPage extends HookConsumerWidget {
       TextSearchType.filename => context.t.file_name_or_extension,
       TextSearchType.description => context.t.search_by_description_example,
       TextSearchType.ocr => context.t.search_by_ocr_example,
+      TextSearchType.transcript => context.t.search_by_transcript_example,
     };
     final textSearchController = useTextEditingController();
     final filter = useState<SearchFilter>(
@@ -81,16 +82,36 @@ class SearchPage extends HookConsumerWidget {
     final userPreferences = ref.watch(Store.userMetadata.preferences()).valueOrNull;
 
     void search(SearchFilter f) {
-      if (f == filter.value) {
+      var normalizedFilter = f;
+      if (f.mediaType == AssetType.audio) {
+        if (textSearchType == TextSearchType.context) {
+          selectedTextSearchType.value = (f.transcript?.isNotEmpty ?? false)
+              ? TextSearchType.transcript
+              : (f.description?.isNotEmpty ?? false)
+              ? TextSearchType.description
+              : (f.ocr?.isNotEmpty ?? false)
+              ? TextSearchType.ocr
+              : TextSearchType.filename;
+        }
+        if (f.context?.isNotEmpty ?? false) {
+          final hasExplicitTextFilter =
+              (f.filename?.isNotEmpty ?? false) ||
+              (f.description?.isNotEmpty ?? false) ||
+              (f.ocr?.isNotEmpty ?? false) ||
+              (f.transcript?.isNotEmpty ?? false);
+          normalizedFilter = f.copyWith(context: null, filename: hasExplicitTextFilter ? f.filename : f.context);
+        }
+      }
+      if (normalizedFilter == filter.value) {
         return;
       }
 
-      filter.value = f;
+      filter.value = normalizedFilter;
 
       ref.read(paginatedSearchProvider.notifier).clear();
 
-      if (!f.isEmpty) {
-        unawaited(ref.read(paginatedSearchProvider.notifier).search(f));
+      if (!normalizedFilter.isEmpty) {
+        unawaited(ref.read(paginatedSearchProvider.notifier).search(normalizedFilter));
       }
     }
 
@@ -394,10 +415,12 @@ class SearchPage extends HookConsumerWidget {
 
       void handleApply() {
         mediaTypeCurrentFilterWidget.value = mediaType != AssetType.other
-            ? Text(
-                mediaType == AssetType.image ? context.t.image : context.t.video,
-                style: context.textTheme.labelLarge,
-              )
+            ? Text(switch (mediaType) {
+                AssetType.image => context.t.image,
+                AssetType.video => context.t.video,
+                AssetType.audio => context.t.audio,
+                AssetType.other => context.t.all,
+              }, style: context.textTheme.labelLarge)
             : null;
         search(filter.value.copyWith(mediaType: mediaType));
       }
@@ -409,7 +432,11 @@ class SearchPage extends HookConsumerWidget {
             title: context.t.search_filter_media_type_title,
             onSearch: handleApply,
             onClear: handleClear,
-            child: MediaTypePicker(onSelect: handleOnSelected, filter: filter.value.mediaType),
+            child: MediaTypePicker(
+              onSelect: handleOnSelected,
+              filter: filter.value.mediaType,
+              audioSupported: serverFeatures.audio,
+            ),
           ),
         ),
       );
@@ -496,10 +523,41 @@ class SearchPage extends HookConsumerWidget {
     }
 
     void handleTextSubmitted(String value) => search(switch (textSearchType) {
-      TextSearchType.context => filter.value.copyWith(filename: '', context: value, description: '', ocr: ''),
-      TextSearchType.filename => filter.value.copyWith(filename: value, context: '', description: '', ocr: ''),
-      TextSearchType.description => filter.value.copyWith(filename: '', context: '', description: value, ocr: ''),
-      TextSearchType.ocr => filter.value.copyWith(filename: '', context: '', description: '', ocr: value),
+      TextSearchType.context => filter.value.copyWith(
+        filename: '',
+        context: value,
+        description: '',
+        ocr: '',
+        transcript: '',
+      ),
+      TextSearchType.filename => filter.value.copyWith(
+        filename: value,
+        context: '',
+        description: '',
+        ocr: '',
+        transcript: '',
+      ),
+      TextSearchType.description => filter.value.copyWith(
+        filename: '',
+        context: '',
+        description: value,
+        ocr: '',
+        transcript: '',
+      ),
+      TextSearchType.ocr => filter.value.copyWith(
+        filename: '',
+        context: '',
+        description: '',
+        ocr: value,
+        transcript: '',
+      ),
+      TextSearchType.transcript => filter.value.copyWith(
+        filename: '',
+        context: '',
+        description: '',
+        ocr: '',
+        transcript: value,
+      ),
     });
 
     IconData getSearchPrefixIcon() => switch (textSearchType) {
@@ -507,6 +565,7 @@ class SearchPage extends HookConsumerWidget {
       TextSearchType.filename => Icons.abc_rounded,
       TextSearchType.description => Icons.text_snippet_outlined,
       TextSearchType.ocr => Icons.document_scanner_outlined,
+      TextSearchType.transcript => Icons.record_voice_over_outlined,
     };
 
     return Scaffold(
@@ -538,26 +597,27 @@ class SearchPage extends HookConsumerWidget {
                 );
               },
               menuChildren: [
-                FeatureCheck(
-                  feature: (features) => features.smartSearch,
-                  child: MenuItemButton(
-                    child: ListTile(
-                      leading: const Icon(Icons.image_search_rounded),
-                      title: Text(
-                        context.t.search_by_context,
-                        style: context.textTheme.bodyLarge?.copyWith(
-                          fontWeight: FontWeight.w500,
-                          color: textSearchType == TextSearchType.context ? context.colorScheme.primary : null,
+                if (filter.value.mediaType != AssetType.audio)
+                  FeatureCheck(
+                    feature: (features) => features.smartSearch,
+                    child: MenuItemButton(
+                      child: ListTile(
+                        leading: const Icon(Icons.image_search_rounded),
+                        title: Text(
+                          context.t.search_by_context,
+                          style: context.textTheme.bodyLarge?.copyWith(
+                            fontWeight: FontWeight.w500,
+                            color: textSearchType == TextSearchType.context ? context.colorScheme.primary : null,
+                          ),
                         ),
+                        selectedColor: context.colorScheme.primary,
+                        selected: textSearchType == TextSearchType.context,
                       ),
-                      selectedColor: context.colorScheme.primary,
-                      selected: textSearchType == TextSearchType.context,
+                      onPressed: () {
+                        selectedTextSearchType.value = TextSearchType.context;
+                      },
                     ),
-                    onPressed: () {
-                      selectedTextSearchType.value = TextSearchType.context;
-                    },
                   ),
-                ),
                 MenuItemButton(
                   child: ListTile(
                     leading: const Icon(Icons.abc_rounded),
@@ -612,6 +672,24 @@ class SearchPage extends HookConsumerWidget {
                     },
                   ),
                 ),
+                if (serverFeatures.speechToText)
+                  MenuItemButton(
+                    child: ListTile(
+                      leading: const Icon(Icons.record_voice_over_outlined),
+                      title: Text(
+                        context.t.audio_transcript,
+                        style: context.textTheme.bodyLarge?.copyWith(
+                          fontWeight: FontWeight.w500,
+                          color: textSearchType == TextSearchType.transcript ? context.colorScheme.primary : null,
+                        ),
+                      ),
+                      selectedColor: context.colorScheme.primary,
+                      selected: textSearchType == TextSearchType.transcript,
+                    ),
+                    onPressed: () {
+                      selectedTextSearchType.value = TextSearchType.transcript;
+                    },
+                  ),
               ],
             ),
           ),

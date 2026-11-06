@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:drift/drift.dart' hide isNotNull, isNull;
@@ -5,11 +6,15 @@ import 'package:drift/native.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:immich_mobile/data/db/main/database.dart';
+import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
+import 'package:immich_mobile/domain/models/settings_key.dart';
 import 'package:immich_mobile/domain/models/store.model.dart';
 import 'package:immich_mobile/domain/services/store.service.dart';
 import 'package:immich_mobile/entities/store.entity.dart';
+import 'package:immich_mobile/infrastructure/repositories/audio_support.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/settings.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/store.repository.dart';
+import 'package:immich_mobile/platform/connectivity_api.g.dart';
 import 'package:immich_mobile/repositories/upload.repository.dart';
 import 'package:immich_mobile/services/foreground_upload.service.dart';
 import 'package:mocktail/mocktail.dart';
@@ -20,6 +25,8 @@ import '../infrastructure/repository.mock.dart';
 import '../mocks/asset_entity.mock.dart';
 import '../repository.mocks.dart';
 import '../service.mocks.dart';
+
+class MockAudioSupportRepository extends Mock implements AudioSupportRepository {}
 
 void main() {
   late ForegroundUploadService sut;
@@ -105,7 +112,95 @@ void main() {
     return captured;
   }
 
+  group('audio backup network requirements', () {
+    for (final sequential in [false, true]) {
+      for (final allowCellular in [false, true]) {
+        test('cellular=$allowCellular applies to sequential=$sequential uploads', () async {
+          final support = MockAudioSupportRepository();
+          when(support.isSupported).thenAnswer((_) async => true);
+          sut = ForegroundUploadService(
+            mockUploadRepository,
+            mockStorageRepository,
+            mockBackupRepository,
+            mockConnectivityApi,
+            mockAssetMediaRepository,
+            mockAssetService,
+            audioSupport: support,
+          );
+          final asset = LocalAssetStub.image1.copyWith(type: AssetType.audio, name: 'recording.m4a');
+          when(
+            () => mockBackupRepository.getCandidates('user', onlyHashed: true, includeAudio: true),
+          ).thenAnswer((_) async => [asset]);
+          when(() => mockConnectivityApi.getCapabilities()).thenAnswer((_) async => [NetworkCapability.cellular]);
+          when(() => mockStorageRepository.clearCache()).thenAnswer((_) async {});
+          when(() => mockStorageRepository.isAssetAvailableLocally(asset.id)).thenAnswer((_) async => true);
+          when(
+            () => mockStorageRepository.getFileForAsset(asset.id),
+          ).thenAnswer((_) async => File('/tmp/recording.m4a'));
+          final uploaded = captureFields();
+          final settings = SettingsRepository.instance;
+          try {
+            await settings.write(SettingsKey.backupUseCellularForPhotos, true);
+            await settings.write(SettingsKey.backupUseCellularForVideos, true);
+            await settings.write(SettingsKey.backupUseCellularForAudio, allowCellular);
+
+            await sut.uploadCandidates('user', Completer<void>(), useSequentialUpload: sequential);
+
+            expect(uploaded, hasLength(allowCellular ? 1 : 0));
+          } finally {
+            await settings.clear([
+              SettingsKey.backupUseCellularForPhotos,
+              SettingsKey.backupUseCellularForVideos,
+              SettingsKey.backupUseCellularForAudio,
+            ]);
+          }
+        });
+      }
+    }
+  });
+
   group('uploadSingleAsset', () {
+    test('does not access audio files or upload to an unsupported server', () async {
+      final asset = LocalAssetStub.image1.copyWith(type: AssetType.audio, name: 'recording.m4a');
+      final errors = <String>[];
+      await sut.uploadSingleAsset(
+        asset,
+        null,
+        callbacks: UploadCallbacks(onError: (_, message) => errors.add(message)),
+      );
+      expect(errors, hasLength(1));
+      verifyZeroInteractions(mockStorageRepository);
+      verifyZeroInteractions(mockUploadRepository);
+    });
+
+    test('uploads audio without a Photos asset and preserves filename and duration', () async {
+      final support = MockAudioSupportRepository();
+      when(support.isSupported).thenAnswer((_) async => true);
+      sut = ForegroundUploadService(
+        mockUploadRepository,
+        mockStorageRepository,
+        mockBackupRepository,
+        mockConnectivityApi,
+        mockAssetMediaRepository,
+        mockAssetService,
+        audioSupport: support,
+      );
+      final asset = LocalAssetStub.image1.copyWith(
+        id: 'audio-file:folder:recording',
+        type: AssetType.audio,
+        name: 'recording.m4a',
+        durationMs: 42000,
+      );
+      when(() => mockStorageRepository.isAssetAvailableLocally(asset.id)).thenAnswer((_) async => true);
+      when(() => mockStorageRepository.getFileForAsset(asset.id)).thenAnswer((_) async => File('/tmp/recording.m4a'));
+      final fields = captureFields();
+      await sut.uploadSingleAsset(asset, null, callbacks: const UploadCallbacks());
+      expect(fields, hasLength(1));
+      expect(fields.single['duration'], '42000');
+      expect(fields.single.containsKey('livePhotoVideoId'), isFalse);
+      verifyNever(() => mockStorageRepository.getAssetEntityForAsset(asset));
+    });
+
     test('should upload the motion part hidden and keep the still image visible', () async {
       final asset = LocalAssetStub.image1;
       final mockEntity = MockAssetEntity();

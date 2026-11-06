@@ -211,6 +211,10 @@ ImageProvider? getThumbnailImageProvider(
   Size? remoteSize,
   bool edited = true,
 }) {
+  if (asset.isAudio) {
+    return null;
+  }
+
   if (_shouldUseLocalAsset(asset)) {
     final id = asset is LocalAsset ? asset.id : (asset as RemoteAsset).localId!;
     return LocalThumbProvider(id: id, size: size, assetType: asset.type, checksum: asset.checksum);

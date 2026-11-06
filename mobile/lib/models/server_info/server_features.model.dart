@@ -13,6 +13,10 @@ abstract class ServerFeatures with _$ServerFeatures {
     required bool passwordLogin,
     @Default(false) bool ocr,
     @Default(false) bool smartSearch,
+    @Default(false) bool audio,
+    @Default(false) bool audioWaveform,
+    @Default(false) bool speechToText,
+    @Default(false) bool audioSummary,
   }) = _ServerFeatures;
 
   factory ServerFeatures.fromDto(ServerFeaturesDto dto) => ServerFeatures(
@@ -22,5 +26,9 @@ abstract class ServerFeatures with _$ServerFeatures {
     passwordLogin: dto.passwordLogin,
     ocr: dto.ocr,
     smartSearch: dto.smartSearch,
+    audio: dto.audio.orElse(null) ?? false,
+    audioWaveform: dto.audioWaveform.orElse(null) ?? false,
+    speechToText: dto.speechToText.orElse(null) ?? false,
+    audioSummary: dto.audioSummary.orElse(null) ?? false,
   );
 }

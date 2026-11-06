@@ -8,6 +8,7 @@ import {
   AssetStatus,
   AssetType,
   AssetVisibility,
+  AudioAnalysisStatus,
   JobName,
   JobStatus,
 } from 'src/enum.js';
@@ -723,6 +724,114 @@ describe(AssetService.name, () => {
   });
 
   describe('run', () => {
+    const audioJobs = [
+      { name: AssetJobName.GENERATE_WAVEFORM, kind: 'waveform', job: JobName.AssetGenerateWaveform },
+      { name: AssetJobName.TRANSCRIBE_AUDIO, kind: 'transcript', job: JobName.AssetTranscribe },
+    ] as const;
+
+    it.each(audioJobs)('should require update permission before starting $kind analysis', async ({ name }) => {
+      const asset = AssetFactory.create({ type: AssetType.Audio });
+
+      await expect(sut.run(authStub.admin, { assetIds: [asset.id], name })).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(mocks.asset.getByIds).not.toHaveBeenCalled();
+      expect(mocks.audioAnalysis.setStatus).not.toHaveBeenCalled();
+      expect(mocks.job.queueAll).not.toHaveBeenCalled();
+    });
+
+    it.each(audioJobs)('should reject missing assets before starting $kind analysis', async ({ name }) => {
+      const asset = AssetFactory.create({ type: AssetType.Audio });
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+      mocks.asset.getByIds.mockResolvedValue([]);
+
+      await expect(sut.run(authStub.admin, { assetIds: [asset.id], name })).rejects.toThrow(
+        'Audio analysis requires available audio assets',
+      );
+
+      expect(mocks.audioAnalysis.setStatus).not.toHaveBeenCalled();
+      expect(mocks.job.queueAll).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { type: AssetType.Image },
+      { type: AssetType.Video },
+      { isOffline: true },
+      { visibility: AssetVisibility.Hidden },
+      { deletedAt: new Date() },
+    ])('should reject unavailable audio analysis inputs: %j', async (changes) => {
+      const asset = AssetFactory.create({ type: AssetType.Audio, ...changes });
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+      mocks.asset.getByIds.mockResolvedValue([asset]);
+
+      await expect(
+        sut.run(authStub.admin, { assetIds: [asset.id], name: AssetJobName.GENERATE_WAVEFORM }),
+      ).rejects.toThrow('Audio analysis requires available audio assets');
+
+      expect(mocks.audioAnalysis.setStatus).not.toHaveBeenCalled();
+      expect(mocks.job.queueAll).not.toHaveBeenCalled();
+    });
+
+    it.each([{ enabled: false }, { speechToText: { enabled: false } }])(
+      'should reject manual transcription when disabled: %j',
+      async (machineLearning) => {
+        const asset = AssetFactory.create({ type: AssetType.Audio });
+        mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+        mocks.asset.getByIds.mockResolvedValue([asset]);
+        mocks.systemMetadata.get.mockResolvedValue({ machineLearning });
+
+        await expect(
+          sut.run(authStub.admin, { assetIds: [asset.id], name: AssetJobName.TRANSCRIBE_AUDIO }),
+        ).rejects.toThrow('Speech recognition is disabled');
+
+        expect(mocks.audioAnalysis.setStatus).not.toHaveBeenCalled();
+        expect(mocks.job.queueAll).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(audioJobs)(
+      'should mark $kind pending and force one manual job for each distinct asset',
+      async ({ name, kind, job }) => {
+        const asset = AssetFactory.create({ type: AssetType.Audio });
+        mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+        mocks.asset.getByIds.mockResolvedValue([asset]);
+        mocks.systemMetadata.get.mockResolvedValue({ machineLearning: { speechToText: { autoTranscribe: false } } });
+        mocks.audioAnalysis.setStatus.mockResolvedValue(undefined);
+
+        await sut.run(authStub.admin, { assetIds: [asset.id, asset.id], name });
+
+        expect(mocks.audioAnalysis.setStatus).toHaveBeenCalledExactlyOnceWith(
+          [asset.id],
+          kind,
+          AudioAnalysisStatus.Pending,
+        );
+        expect(mocks.job.queueAll).toHaveBeenCalledExactlyOnceWith([
+          {
+            name: job,
+            data: kind === 'transcript' ? { id: asset.id, force: true, manual: true } : { id: asset.id, force: true },
+          },
+        ]);
+        expect(mocks.audioAnalysis.setStatus.mock.invocationCallOrder[0]).toBeLessThan(
+          mocks.job.queueAll.mock.invocationCallOrder[0],
+        );
+      },
+    );
+
+    it.each(audioJobs)('should mark $kind failed and report a failed manual enqueue', async ({ name, kind }) => {
+      const asset = AssetFactory.create({ type: AssetType.Audio });
+      const error = new Error('Redis unavailable');
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+      mocks.asset.getByIds.mockResolvedValue([asset]);
+      mocks.audioAnalysis.setStatus.mockResolvedValue(undefined);
+      mocks.job.queueAll.mockRejectedValue(error);
+
+      await expect(sut.run(authStub.admin, { assetIds: [asset.id], name })).rejects.toBe(error);
+
+      expect(mocks.audioAnalysis.setStatus.mock.calls).toEqual([
+        [[asset.id], kind, AudioAnalysisStatus.Pending],
+        [[asset.id], kind, AudioAnalysisStatus.Failed],
+      ]);
+    });
+
     it('should run the refresh faces job', async () => {
       mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set(['asset-1']));
 

@@ -10,7 +10,7 @@ from typing import Any, AsyncGenerator, Callable
 from zipfile import BadZipFile
 
 import orjson
-from fastapi import Depends, FastAPI, File, Form, HTTPException
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse
 from onnxruntime.capi.onnxruntime_pybind11_state import InvalidProtobuf, NoSuchFile
 from PIL.Image import Image
@@ -19,20 +19,24 @@ from starlette.formparsers import MultiPartParser
 
 from immich_ml import allocator
 from immich_ml.models.base import InferenceModel
+from immich_ml.models.speech.audio import MAX_AUDIO_BYTES, decode_audio
 from immich_ml.models.transforms import decode_pil
 from immich_ml.sessions.ort import flush_denormals
 
 from .config import PreloadModelData, log, settings
 from .models.base import InferenceEntry
 from .models.cache import ModelCache
-from .pipeline import Clip, FacialRecognition, Ocr, PipelineRequest, Slot
+from .pipeline import Clip, FacialRecognition, Ocr, PipelineRequest, Slot, SpeechToText
 from .schemas import (
+    AudioInput,
     FaceDetectionOptions,
     FaceRecognitionOptions,
     InferenceResponse,
     ModelFormat,
     ModelIdentity,
+    ModelTask,
     Options,
+    SpeechTranscriptionOptions,
     TextDetectionOptions,
     TextRecognitionOptions,
     TextualOptions,
@@ -108,6 +112,10 @@ async def preload_models(preload: PreloadModelData) -> None:
             PipelineRequest(ocr=Ocr(recognition=Slot(name, TextRecognitionOptions())))
             for name in _names(preload.ocr.recognition)
         ),
+        *(
+            PipelineRequest(speech_to_text=SpeechToText(transcription=Slot(name, SpeechTranscriptionOptions())))
+            for name in _names(preload.speech_to_text)
+        ),
     ]
     for entry in (entry for request in requests for entry in request.entries()):
         await _preload(entry)
@@ -167,12 +175,28 @@ async def predict(
     entries: list[InferenceEntry[Any]] = Depends(get_entries),
     image: bytes | None = File(default=None),
     text: str | None = Form(default=None),
+    audio: UploadFile | None = File(default=None),
 ) -> Any:
-    if image is not None:
+    speech_entries = [entry for entry in entries if entry.model.identity[1] == ModelTask.SPEECH_TO_TEXT]
+    inputs: Image | str | AudioInput
+    if audio is not None:
+        try:
+            if image is not None or text is not None or len(speech_entries) != len(entries):
+                raise HTTPException(400, "Audio cannot be combined with image or text tasks")
+            payload = await audio.read(MAX_AUDIO_BYTES + 1)
+            try:
+                inputs = await run(lambda: decode_audio(payload))
+            except ValueError as error:
+                raise HTTPException(422, str(error)) from error
+        finally:
+            await audio.close()
+    elif speech_entries:
+        raise HTTPException(400, "An audio file must be provided for speech transcription")
+    elif image is not None:
         decoded = await run(lambda: decode_pil(image))
         if decoded.width == 0 or decoded.height == 0:
             raise HTTPException(400, "Image has zero width or height")
-        inputs: Image | str = decoded
+        inputs = decoded
     elif text is not None:
         inputs = text
     else:
@@ -181,7 +205,7 @@ async def predict(
     return ORJSONResponse(response)
 
 
-async def run_inference(payload: Image | str, entries: list[InferenceEntry[Any]]) -> InferenceResponse:
+async def run_inference(payload: Image | str | AudioInput, entries: list[InferenceEntry[Any]]) -> InferenceResponse:
     read: set[ModelIdentity] = set()
 
     async def _run_inference[O: Options](entry: InferenceEntry[O]) -> Any:

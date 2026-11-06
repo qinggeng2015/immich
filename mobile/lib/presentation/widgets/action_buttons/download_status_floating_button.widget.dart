@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:auto_route/auto_route.dart';
+import 'package:background_downloader/background_downloader.dart';
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
@@ -13,16 +14,31 @@ class DownloadStatusFloatingButton extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final shouldShow = ref.watch(downloadStateProvider.select((state) => state.showProgress));
-    final itemCount = ref.watch(downloadStateProvider.select((state) => state.taskProgress.length));
-    final isDownloading = ref
-        .watch(downloadStateProvider.select((state) => state.taskProgress))
-        .values
-        .where((element) => element.progress != 1)
-        .isNotEmpty;
+    final tasks = ref.watch(downloadStateProvider.select((state) => state.taskProgress)).values;
+    final isDownloading = tasks.any(
+      (task) =>
+          task.status == TaskStatus.enqueued ||
+          task.status == TaskStatus.running ||
+          task.status == TaskStatus.waitingToRetry,
+    );
+    final hasError = tasks.any((task) => task.status == TaskStatus.failed || task.status == TaskStatus.notFound);
+    final isComplete = tasks.isNotEmpty && tasks.every((task) => task.status == TaskStatus.complete);
+    final icon = hasError
+        ? Icons.error_outline
+        : isDownloading
+        ? Icons.downloading_rounded
+        : isComplete
+        ? Icons.download_done
+        : Icons.download_rounded;
+    final iconColor = hasError
+        ? context.colorScheme.error
+        : isComplete
+        ? (context.isDarkTheme ? Colors.green[200] : Colors.green[400])
+        : context.colorScheme.primary;
 
     return shouldShow
         ? Badge.count(
-            count: itemCount,
+            count: tasks.length,
             textColor: context.colorScheme.onPrimary,
             backgroundColor: context.colorScheme.primary,
             child: FloatingActionButton(
@@ -40,13 +56,7 @@ class DownloadStatusFloatingButton extends ConsumerWidget {
               child: Stack(
                 alignment: AlignmentDirectional.center,
                 children: [
-                  isDownloading
-                      ? Icon(Icons.downloading_rounded, color: context.colorScheme.primary, size: 28)
-                      : Icon(
-                          Icons.download_done,
-                          color: context.isDarkTheme ? Colors.green[200] : Colors.green[400],
-                          size: 28,
-                        ),
+                  Icon(icon, color: iconColor, size: 28),
                   if (isDownloading)
                     const SizedBox(
                       height: 31,

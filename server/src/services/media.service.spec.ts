@@ -398,6 +398,28 @@ describe(MediaService.name, () => {
       expect(mocks.asset.update).not.toHaveBeenCalledWith();
     });
 
+    it('should generate an audio cover without decoding the original audio as an image', async () => {
+      const asset = AssetFactory.from({ type: AssetType.Audio, originalPath: '/original/song.flac' }).exif().build();
+      const thumbhash = Buffer.from('audio cover');
+      mocks.assetJob.getForGenerateThumbnailJob.mockResolvedValue(getForGenerateThumbnail(asset));
+      mocks.media.generateThumbhash.mockResolvedValue(thumbhash);
+
+      await expect(sut.handleGenerateThumbnails({ id: asset.id })).resolves.toBe(JobStatus.Success);
+
+      expect(mocks.media.decodeImage).toHaveBeenCalledExactlyOnceWith(
+        expect.any(Buffer),
+        expect.objectContaining({ colorspace: Colorspace.Srgb }),
+      );
+      expect(mocks.media.generateThumbnail).toHaveBeenCalledTimes(2);
+      expect(mocks.media.transcode).not.toHaveBeenCalled();
+      expect(mocks.media.extract).not.toHaveBeenCalled();
+      expect(mocks.asset.upsertFiles).toHaveBeenCalledWith([
+        expect.objectContaining({ assetId: asset.id, type: AssetFileType.Preview }),
+        expect.objectContaining({ assetId: asset.id, type: AssetFileType.Thumbnail }),
+      ]);
+      expect(mocks.asset.update).toHaveBeenCalledWith({ id: asset.id, thumbhash });
+    });
+
     it('should skip invisible assets', async () => {
       const asset = AssetFactory.from({ visibility: AssetVisibility.Hidden }).exif().build();
       mocks.assetJob.getForGenerateThumbnailJob.mockResolvedValue(getForGenerateThumbnail(asset));
@@ -2103,8 +2125,62 @@ describe(MediaService.name, () => {
     });
 
     it('should skip transcoding if asset not found', async () => {
-      await sut.handleVideoConversion({ id: 'video-id' });
+      mocks.assetJob.getForVideoConversion.mockResolvedValue(undefined);
+
+      await expect(sut.handleVideoConversion({ id: 'video-id' })).resolves.toBe(JobStatus.Failed);
+
       expect(mocks.media.transcode).not.toHaveBeenCalled();
+      expect(mocks.asset.upsertFile).not.toHaveBeenCalled();
+    });
+
+    it('should encode audio without a video stream even when video transcoding is disabled', async () => {
+      mocks.systemMetadata.get.mockResolvedValue({ ffmpeg: { transcode: TranscodePolicy.Disabled } });
+      mocks.assetJob.getForVideoConversion.mockResolvedValue({
+        ...asset,
+        type: AssetType.Audio,
+        videoStream: null,
+        format: null,
+        audioStream: { index: 2, codecName: 'flac', bitrate: 500_000, profile: null },
+      });
+
+      await expect(sut.handleVideoConversion({ id: asset.id })).resolves.toBe(JobStatus.Success);
+
+      expect(mocks.media.transcode).toHaveBeenCalledExactlyOnceWith(
+        asset.originalPath,
+        expect.stringMatching(/\.mp4$/),
+        expect.objectContaining({
+          outputOptions: expect.arrayContaining(['-map', '0:2', '-vn', '-c:a', 'aac', '-f', 'mp4']),
+          twoPass: false,
+        }),
+      );
+      expect(mocks.asset.upsertFile).toHaveBeenCalledExactlyOnceWith({
+        assetId: asset.id,
+        type: AssetFileType.EncodedVideo,
+        path: expect.stringMatching(/\.mp4$/),
+        isEdited: false,
+      });
+    });
+
+    it('should fail an audio transcode with missing audio metadata without publishing a derivative', async () => {
+      mocks.assetJob.getForVideoConversion.mockResolvedValue({ ...asset, type: AssetType.Audio });
+
+      await expect(sut.handleVideoConversion({ id: asset.id })).resolves.toBe(JobStatus.Failed);
+
+      expect(mocks.media.transcode).not.toHaveBeenCalled();
+      expect(mocks.asset.upsertFile).not.toHaveBeenCalled();
+    });
+
+    it('should not publish an audio derivative when encoding fails', async () => {
+      mocks.assetJob.getForVideoConversion.mockResolvedValue({
+        ...asset,
+        type: AssetType.Audio,
+        audioStream: { index: 0, codecName: 'flac', bitrate: 500_000, profile: null },
+      });
+      mocks.media.transcode.mockRejectedValue(new Error('Invalid audio'));
+
+      await expect(sut.handleVideoConversion({ id: asset.id })).rejects.toThrow('Invalid audio');
+
+      expect(mocks.asset.upsertFile).not.toHaveBeenCalled();
     });
 
     it('should transcode the highest bitrate video stream', async () => {
@@ -2150,6 +2226,20 @@ describe(MediaService.name, () => {
       await sut.handleVideoConversion({ id: 'video-id' });
       expect(mocks.media.transcode).not.toHaveBeenCalled();
     });
+
+    it.each([{ videoStream: null }, { format: null }, { videoStream: null, format: null }])(
+      'should fail safely when video metadata is missing: %j',
+      async (missingMetadata) => {
+        mocks.assetJob.getForVideoConversion.mockResolvedValue({ ...asset, ...missingMetadata });
+
+        await expect(sut.handleVideoConversion({ id: asset.id })).resolves.toBe(JobStatus.Failed);
+
+        expect(mocks.media.transcode).not.toHaveBeenCalled();
+        expect(mocks.asset.upsertFile).not.toHaveBeenCalled();
+        expect(mocks.asset.deleteFiles).not.toHaveBeenCalled();
+        expect(mocks.job.queue).not.toHaveBeenCalled();
+      },
+    );
 
     it('should skip a video without any height', async () => {
       mocks.assetJob.getForVideoConversion.mockResolvedValue({ ...asset, ...probeStub.noHeight });

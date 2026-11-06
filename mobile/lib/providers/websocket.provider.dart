@@ -61,6 +61,7 @@ class WebsocketNotifier extends StateNotifier<WebsocketState> {
           OptionBuilder()
               .setPath("${endpoint.path}/socket.io")
               .setTransports(['websocket'])
+              .setAuth({'features': 'audio,audio-analysis,audio-summary'})
               .setWebSocketConnector(NetworkRepository.createWebSocket)
               .enableReconnection()
               .enableForceNew()

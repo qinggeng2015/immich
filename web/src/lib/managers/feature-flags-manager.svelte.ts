@@ -22,6 +22,22 @@ class FeatureFlagsManager {
     return this.#value;
   }
 
+  get supportsAudio() {
+    return this.#value?.audio === true;
+  }
+
+  get supportsAudioWaveform() {
+    return this.#value?.audioWaveform === true;
+  }
+
+  get supportsSpeechToText() {
+    return this.#value?.speechToText === true;
+  }
+
+  get supportsAudioSummary() {
+    return this.#value?.audioSummary === true;
+  }
+
   async #loadFeatureFlags() {
     this.#value = await getServerFeatures();
   }

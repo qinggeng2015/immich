@@ -13,6 +13,14 @@ class DevicePermissionService {
 
   Future<DevicePermissionStatus> requestGallery() => _gallery(_permissionRepository.request);
 
+  Future<DevicePermissionStatus> requestAudio() async {
+    if (!CurrentPlatform.isAndroid) {
+      return DevicePermissionStatus.denied;
+    }
+    final sdkVersion = await _permissionRepository.getAndroidSdkVersion();
+    return _permissionRepository.request(sdkVersion <= 32 ? DevicePermission.storage : DevicePermission.audio);
+  }
+
   Future<DevicePermissionStatus> _gallery(_Handler handler) async {
     if (CurrentPlatform.isIOS) {
       return handler(.photos);

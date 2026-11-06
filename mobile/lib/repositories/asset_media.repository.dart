@@ -48,12 +48,16 @@ class AssetMediaRepository {
   }
 
   Future<List<String>> deleteAll(List<String> ids, {bool trash = true}) async {
+    final mediaIds = ids.where((id) => !id.startsWith('audio-file:') && !id.startsWith('saf-file:')).toList();
+    if (mediaIds.isEmpty) {
+      return [];
+    }
     if (trash && CurrentPlatform.isAndroid && await _androidSupportsTrash()) {
       return PhotoManager.editor.android.moveToTrash(
-        ids.map((e) => AssetEntity(id: e, width: 1, height: 1, typeInt: 0)).toList(),
+        mediaIds.map((e) => AssetEntity(id: e, width: 1, height: 1, typeInt: 0)).toList(),
       );
     }
-    return PhotoManager.editor.deleteWithIds(ids);
+    return PhotoManager.editor.deleteWithIds(mediaIds);
   }
 
   Future<bool> _restoreFromTrashById(String mediaId, int type) async {
@@ -78,6 +82,9 @@ class AssetMediaRepository {
   }
 
   Future<String?> getOriginalFilename(String id) async {
+    if (id.startsWith('saf-file:') || id.startsWith('audio-file:')) {
+      return null;
+    }
     final entity = await AssetEntity.fromId(id);
     if (entity == null) {
       return null;
@@ -131,7 +138,7 @@ class AssetMediaRepository {
   }
 
   static String _shareDisplayName(BaseAsset asset, ShareAssetType fileType) =>
-      switch (asset.isVideo ? ShareAssetType.original : fileType) {
+      switch (asset.isVideo || asset.isAudio ? ShareAssetType.original : fileType) {
         ShareAssetType.original => _getOriginalShareFilename(asset),
         ShareAssetType.preview => _getPreviewFilename(asset),
       };
@@ -148,6 +155,16 @@ class AssetMediaRepository {
       return null;
     }
 
+    if (localId.startsWith('saf-file:')) {
+      final directory = await Directory.systemTemp.createTemp('immich-share-');
+      try {
+        final renamed = await file.rename(p.join(directory.path, displayName));
+        return (file: renamed, tempEntity: directory, displayName: displayName);
+      } catch (_) {
+        await cleanupTempFiles([file, directory]);
+        rethrow;
+      }
+    }
     return (file: file, tempEntity: CurrentPlatform.isIOS ? file : null, displayName: displayName);
   }
 
@@ -342,7 +359,7 @@ class AssetMediaRepository {
         return 0;
       }
 
-      final effectiveFileType = asset.isVideo ? ShareAssetType.original : fileType;
+      final effectiveFileType = asset.isVideo || asset.isAudio ? ShareAssetType.original : fileType;
       final displayName = _shareDisplayName(asset, fileType);
 
       final shareFile = switch (effectiveFileType) {

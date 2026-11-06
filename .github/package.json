@@ -1,4 +1,6 @@
 {
+  "name": "github",
+  "private": true,
   "scripts": {
     "format": "prettier --cache --check .",
     "format:fix": "prettier --cache --write --list-different ."

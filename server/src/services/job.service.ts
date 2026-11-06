@@ -3,10 +3,25 @@ import type { JobItem } from 'src/types.js';
 import { OnEvent } from 'src/decorators.js';
 import { mapAsset } from 'src/dtos/asset-response.dto.js';
 import { JobCreateDto } from 'src/dtos/job.dto.js';
-import { AssetType, AssetVisibility, IntegrityReport, JobName, JobStatus, ManualJobName } from 'src/enum.js';
+import {
+  AssetType,
+  AssetVisibility,
+  AudioAnalysisStatus,
+  IntegrityReport,
+  JobName,
+  JobStatus,
+  ManualJobName,
+} from 'src/enum.js';
 import { ArgsOf } from 'src/repositories/event.repository.js';
 import { BaseService } from 'src/services/base.service.js';
+import { isCurrentAudioSource } from 'src/utils/audio-summary.js';
 import { hexOrBufferToBase64 } from 'src/utils/bytes.js';
+import {
+  getAudioSummaryConfig,
+  getSpeechToTextConfig,
+  isAudioSummaryEnabled,
+  isSpeechToTextEnabled,
+} from 'src/utils/misc.js';
 
 const asJobItem = (dto: JobCreateDto): JobItem => {
   switch (dto.name) {
@@ -101,6 +116,33 @@ export class JobService extends BaseService {
   /** Queue follow up jobs */
   private async onDone(item: JobItem) {
     switch (item.name) {
+      case JobName.AssetTranscribe: {
+        const { machineLearning } = await this.getConfig({ withCache: false });
+        if (!isAudioSummaryEnabled(machineLearning) || !getAudioSummaryConfig(machineLearning).autoSummarize) {
+          break;
+        }
+        const asset = await this.assetJobRepository.getForAudioAnalysis(item.data.id);
+        const analysis = await this.audioAnalysisRepository.get(item.data.id);
+        if (
+          !asset ||
+          asset.deletedAt ||
+          asset.isOffline ||
+          asset.visibility === AssetVisibility.Hidden ||
+          !analysis?.transcript?.text.trim() ||
+          !isCurrentAudioSource(analysis.transcriptChecksum, analysis.transcriptSourceModifiedAt, asset)
+        ) {
+          break;
+        }
+        await this.audioAnalysisRepository.setStatus([asset.id], 'summary', AudioAnalysisStatus.Pending);
+        try {
+          await this.jobRepository.queue({ name: JobName.AssetSummarize, data: { id: asset.id } });
+        } catch (error) {
+          await this.audioAnalysisRepository.setStatus([asset.id], 'summary', AudioAnalysisStatus.Failed);
+          throw error;
+        }
+        break;
+      }
+
       case JobName.SidecarCheck: {
         await this.jobRepository.queue({ name: JobName.AssetExtractMetadata, data: item.data });
         break;
@@ -173,17 +215,40 @@ export class JobService extends BaseService {
           break;
         }
 
-        const jobs: JobItem[] = [
-          { name: JobName.SmartSearch, data: item.data },
-          { name: JobName.AssetDetectFaces, data: item.data },
-          { name: JobName.Ocr, data: item.data },
-        ];
+        const jobs: JobItem[] =
+          asset.type === AssetType.Audio
+            ? []
+            : [
+                { name: JobName.SmartSearch, data: item.data },
+                { name: JobName.AssetDetectFaces, data: item.data },
+                { name: JobName.Ocr, data: item.data },
+              ];
 
-        if (asset.type === AssetType.Video) {
+        if (asset.type === AssetType.Audio) {
+          await this.audioAnalysisRepository.setStatus([asset.id], 'waveform', AudioAnalysisStatus.Pending);
+          jobs.push({ name: JobName.AssetGenerateWaveform, data: { id: asset.id } });
+          const { machineLearning } = await this.getConfig({ withCache: true });
+          if (isSpeechToTextEnabled(machineLearning) && getSpeechToTextConfig(machineLearning).autoTranscribe) {
+            await this.audioAnalysisRepository.setStatus([asset.id], 'transcript', AudioAnalysisStatus.Pending);
+            jobs.push({ name: JobName.AssetTranscribe, data: { id: asset.id } });
+          }
+        }
+
+        if (asset.type === AssetType.Video || asset.type === AssetType.Audio) {
           jobs.push({ name: JobName.AssetEncodeVideo, data: item.data });
         }
 
-        await this.jobRepository.queueAll(jobs);
+        try {
+          await this.jobRepository.queueAll(jobs);
+        } catch (error) {
+          if (asset.type === AssetType.Audio) {
+            await this.audioAnalysisRepository.setStatus([asset.id], 'waveform', AudioAnalysisStatus.Failed);
+            if (jobs.some((job) => job.name === JobName.AssetTranscribe)) {
+              await this.audioAnalysisRepository.setStatus([asset.id], 'transcript', AudioAnalysisStatus.Failed);
+            }
+          }
+          throw error;
+        }
         if (asset.visibility === AssetVisibility.Timeline || asset.visibility === AssetVisibility.Archive) {
           this.websocketRepository.clientSend('on_upload_success', asset.ownerId, mapAsset(asset));
           if (asset.exifInfo) {

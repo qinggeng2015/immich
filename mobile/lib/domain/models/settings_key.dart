@@ -40,6 +40,7 @@ enum SettingsKey<T> {
   backupEnabled<bool>(),
   backupUseCellularForVideos<bool>(),
   backupUseCellularForPhotos<bool>(),
+  backupUseCellularForAudio<bool>(),
   backupRequireCharging<bool>(),
   backupTriggerDelay<int>(),
   backupSyncAlbums<bool>(),

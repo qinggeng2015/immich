@@ -72,6 +72,12 @@ export class SearchService extends BaseService {
   }
 
   async searchMetadata(auth: AuthDto, dto: MetadataSearchDto): Promise<SearchResponseDto> {
+    if (
+      auth.sharedLink &&
+      (dto.transcript !== undefined || dto.filter?.transcript || dto.filter?.or?.some((branch) => branch.transcript))
+    ) {
+      throw new BadRequestException('Audio transcript search is not available through shared links');
+    }
     if (isNewShapeRequest(dto)) {
       return this.searchMetadataV3(auth, dto);
     }

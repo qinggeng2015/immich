@@ -65,14 +65,18 @@ class TechnicalDetails extends ConsumerWidget {
 
   Widget _buildFileInfoTile(BuildContext context, WidgetRef ref, BaseAsset asset, ExifInfo? exifInfo) {
     final icon = Icon(
-      asset.isImage ? Icons.image_outlined : Icons.videocam_outlined,
+      asset.isAudio
+          ? Icons.audio_file_outlined
+          : asset.isImage
+          ? Icons.image_outlined
+          : Icons.videocam_outlined,
       size: 24,
       color: context.textTheme.labelLarge?.color,
     );
     final subtitle = _getFileInfo(asset, exifInfo);
     final subtitleStyle = context.textTheme.bodyMedium?.copyWith(color: context.colorScheme.onSurfaceSecondary);
 
-    if (asset is LocalAsset) {
+    if (asset is LocalAsset && !asset.isAudio) {
       final assetMediaRepository = ref.read(assetMediaRepositoryProvider);
       return FutureBuilder<String?>(
         future: assetMediaRepository.getOriginalFilename(asset.id),
@@ -100,7 +104,7 @@ class TechnicalDetails extends ConsumerWidget {
   static String _getFileInfo(BaseAsset asset, ExifInfo? exifInfo) {
     final height = asset.height;
     final width = asset.width;
-    final resolution = (width != null && height != null) ? "$width × $height" : null;
+    final resolution = (!asset.isAudio && width != null && height != null) ? "$width × $height" : null;
     final fileSize = exifInfo?.fileSize != null ? formatBytes(exifInfo!.fileSize!) : null;
 
     return switch ((fileSize, resolution)) {

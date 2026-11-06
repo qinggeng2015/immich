@@ -68,6 +68,7 @@ extension on DevicePermission {
   ph.Permission get handler => switch (this) {
     .photos => ph.Permission.photos,
     .videos => ph.Permission.videos,
+    .audio => ph.Permission.audio,
     .storage => ph.Permission.storage,
     .mediaLocation => ph.Permission.accessMediaLocation,
   };

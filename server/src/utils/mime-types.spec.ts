@@ -1,3 +1,4 @@
+import { AssetType } from 'src/enum.js';
 import { mimeTypes } from 'src/utils/mime-types.js';
 
 describe('mimeTypes', () => {
@@ -105,7 +106,51 @@ describe('mimeTypes', () => {
     });
   }
 
+  describe('audio', () => {
+    it.each([
+      ['.mp3', 'audio/mpeg'],
+      ['.m4a', 'audio/mp4'],
+      ['.m4b', 'audio/mp4'],
+      ['.aac', 'audio/aac'],
+      ['.flac', 'audio/flac'],
+      ['.wav', 'audio/wav'],
+      ['.ogg', 'audio/ogg'],
+      ['.oga', 'audio/ogg'],
+      ['.opus', 'audio/ogg'],
+      ['.aif', 'audio/aiff'],
+      ['.aiff', 'audio/aiff'],
+      ['.wma', 'audio/x-ms-wma'],
+      ['.alac', 'audio/mp4'],
+      ['.amr', 'audio/amr'],
+      ['.caf', 'audio/x-caf'],
+    ])('should recognize %s without classifying it as visual media', (extension, contentType) => {
+      const filename = `recording${extension.toUpperCase()}`;
+      expect(mimeTypes.isAsset(filename)).toBe(true);
+      expect(mimeTypes.isAudio(filename)).toBe(true);
+      expect(mimeTypes.isImage(filename)).toBe(false);
+      expect(mimeTypes.isVideo(filename)).toBe(false);
+      expect(mimeTypes.isProfile(filename)).toBe(false);
+      expect(mimeTypes.lookup(filename)).toBe(contentType);
+      expect(mimeTypes.assetType(filename)).toBe(AssetType.Audio);
+      expect(mimeTypes.getSupportedFileExtensions()).toContain(extension);
+    });
+
+    it.each(['photo.jpg', 'video.mp4', 'video.webm', 'metadata.xmp', 'malicious.mp3.exe'])(
+      'should not classify %s as audio',
+      (filename) => expect(mimeTypes.isAudio(filename)).toBe(false),
+    );
+  });
+
   describe('toExtension', () => {
+    it.each([
+      ['audio/mp4', '.m4a'],
+      ['audio/ogg', '.ogg'],
+      ['audio/mpeg', '.mp3'],
+      ['audio/aiff', '.aiff'],
+    ])('should choose a conventional audio extension for %s', (contentType, extension) => {
+      expect(mimeTypes.toExtension(contentType)).toBe(extension);
+    });
+
     it('should get an extension for a png file', () => {
       expect(mimeTypes.toExtension('image/png')).toEqual('.png');
     });

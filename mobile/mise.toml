@@ -1,7 +1,7 @@
 [tools]
 java = "21.0.2"
 # RUSTUP_TOOLCHAIN makes rustup ignore the targets in rust-toolchain.toml, so the cross targets are listed here too.
-rust = { version = "1.98.0", targets = "aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios" }
+rust = { version = "1.99.1", targets = "aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios" }
 
 [tools."aqua:flutter/flutter"]
 version = "3.47.2"
@@ -144,6 +144,28 @@ run = "dart format --set-exit-if-changed $(find lib -name '*.dart' -not \\( -nam
 description = "Build Android release"
 run = "flutter build appbundle"
 
+[tasks."build:android:debug"]
+description = "Build an installable Android debug APK"
+run = "flutter build apk --debug"
+
+[tasks."install:release-tools"]
+description = "Install repository dependencies needed by Android code generation"
+dir = ".."
+run = "pnpm install --filter immich-monorepo --frozen-lockfile"
+
+[tasks."build:android:release-apks"]
+description = "Build signed split APKs for the audio application"
+run = '''
+set -eu
+test -s android/key.jks
+python3 -c 'import os; value = os.environ.get("AUDIO_BUILD_NUMBER", ""); assert value.isascii() and value.isdecimal() and 3040000 <= int(value) <= 2100000000, "AUDIO_BUILD_NUMBER must be an integer between 3040000 and 2100000000"'
+flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64,android-x64 --build-number "$AUDIO_BUILD_NUMBER"
+'''
+
+[tasks."verify:android:release-apks"]
+description = "Verify release APK identities and produce release metadata"
+run = "python3 scripts/verify_release_apks.py"
+
 [tasks.install]
 alias = "install"
 description = "Install flutter dependencies"
@@ -250,3 +272,30 @@ run = [
   { task = "format" },
   { task = "test" },
 ]
+
+[tasks."check:audio-swift"]
+description = "Parse native audio and sync Swift sources"
+run = "swiftc -frontend -parse ios/Runner/Audio/AudioFileIdentity.swift ios/Runner/Audio/AudioFolderStore.swift ios/Runner/Audio/NativeAudioApiImpl.swift ios/Runner/Sync/MessagesImpl.swift ios/Runner/AppDelegate.swift"
+
+[tasks."check:ios-project"]
+description = "Validate the iOS Xcode project syntax"
+run = "plutil -lint ios/Runner.xcodeproj/project.pbxproj"
+
+[tasks."test:audio-swift"]
+description = "Test native audio file identity and source validation"
+run = '''
+set -eu
+audio_test_dir="$(mktemp -d)"
+trap 'rm -rf "$audio_test_dir"' EXIT
+swiftc -module-cache-path "$audio_test_dir/module-cache" ios/Runner/Audio/AudioFileIdentity.swift test/native/audio/main.swift -o "$audio_test_dir/audio-identity-tests"
+"$audio_test_dir/audio-identity-tests"
+'''
+
+[tasks."format:files"]
+description = "Format selected Dart source and test files"
+run = "dart format --set-exit-if-changed"
+
+[tasks."test:android"]
+description = "Run Android JVM unit tests"
+dir = "android"
+run = "./gradlew :app:testDebugUnitTest --max-workers=2"

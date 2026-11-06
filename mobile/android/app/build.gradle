@@ -37,12 +37,12 @@ android {
   }
 
   defaultConfig {
-    applicationId "app.alextran.immich"
+    applicationId "app.alextran.immich.audio"
     minSdk = 26
     targetSdk = flutter.targetSdkVersion
     versionCode flutter.versionCode
     versionName flutter.versionName
-    resValue "string", "app_name", "Immich"
+    resValue "string", "app_name", "Immich Audio"
   }
 
   signingConfigs {
@@ -73,7 +73,7 @@ android {
       if (prNumber) {
         applicationIdSuffix ".pr${prNumber}"
         versionNameSuffix "-pr${prNumber}"
-        resValue "string", "app_name", "Immich PR ${prNumber}"
+        resValue "string", "app_name", "Immich Audio PR ${prNumber}"
       }
     }
   }
@@ -85,6 +85,7 @@ flutter {
 }
 
 dependencies {
+  testImplementation libs.junit
   implementation libs.okhttp
   implementation libs.cronet.embedded
   implementation libs.media3.datasource.okhttp

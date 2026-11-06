@@ -2621,3 +2621,139 @@ class TestPredictionEndpoints:
             assert actual["box"][box] == pytest.approx(
                 expected["box"][8 * expected_line : 8 * expected_line + 8], abs=0.01
             )
+
+
+class TestSpeech:
+    @staticmethod
+    def wav(samples: int = 1600, rate: int = 16000, channels: int = 1, width: int = 2) -> bytes:
+        import io
+        import wave
+
+        data = io.BytesIO()
+        with wave.open(data, "wb") as audio:
+            audio.setnchannels(channels)
+            audio.setsampwidth(width)
+            audio.setframerate(rate)
+            audio.writeframes(b"\x00" * samples * channels * width)
+        return data.getvalue()
+
+    def test_decodes_pcm_samples(self) -> None:
+        from immich_ml.models.speech.audio import decode_audio
+
+        decoded = decode_audio(self.wav())
+        assert decoded.samples.shape == (1600,)
+        assert decoded.samples.dtype == np.float32
+
+    @pytest.mark.parametrize(
+        "options", [{"samples": 0}, {"samples": 480001}, {"rate": 44100}, {"channels": 2}, {"width": 1}]
+    )
+    def test_rejects_unsupported_audio(self, options: dict[str, int]) -> None:
+        from immich_ml.models.speech.audio import decode_audio
+
+        with pytest.raises(ValueError):
+            decode_audio(self.wav(**options))
+
+    @pytest.mark.parametrize("payload", [b"not audio", b"RIFF"])
+    def test_rejects_malformed_audio(self, payload: bytes) -> None:
+        from immich_ml.models.speech.audio import decode_audio
+
+        with pytest.raises(ValueError):
+            decode_audio(payload)
+
+    def test_rejects_truncated_audio(self) -> None:
+        from immich_ml.models.speech.audio import decode_audio
+
+        with pytest.raises(ValueError):
+            decode_audio(self.wav()[:-1])
+
+    def test_speech_pipeline_and_language_validation(self) -> None:
+        from pydantic import ValidationError
+
+        from immich_ml.models.speech.recognition import SpeechRecognizer
+
+        request = PIPELINE_REQUEST.validate_python(
+            {"speech-to-text": {"transcription": {"modelName": "SenseVoiceSmall"}}}
+        )
+        entries = list(request.entries())
+        assert len(entries) == 1
+        assert entries[0].model is SpeechRecognizer
+        assert entries[0].options.language == "auto"
+        with pytest.raises(ValidationError):
+            PIPELINE_REQUEST.validate_python(
+                {"speech-to-text": {"transcription": {"modelName": "SenseVoiceSmall", "options": {"language": "xx"}}}}
+            )
+
+    def test_endpoint_routes_bounded_audio(self, deployed_app: TestClient, mocker: MockerFixture) -> None:
+        from immich_ml.schemas import AudioInput
+
+        output = {
+            "speech-to-text": {
+                "text": "你好",
+                "language": "zh",
+                "segments": [{"startMs": 0, "endMs": 100, "text": "你好"}],
+            }
+        }
+        inference = mocker.patch("immich_ml.main.run_inference", new_callable=mock.AsyncMock, return_value=output)
+        result = deployed_app.post(
+            "/predict",
+            data={"entries": json.dumps({"speech-to-text": {"transcription": {"modelName": "SenseVoiceSmall"}}})},
+            files={"audio": ("chunk.wav", self.wav(), "audio/wav")},
+        )
+        assert result.status_code == 200
+        assert result.json() == output
+        assert isinstance(inference.call_args.args[0], AudioInput)
+
+    @pytest.mark.parametrize("mode", ["missing", "mixed", "invalid", "image-task"])
+    def test_endpoint_rejects_audio_before_inference(
+        self, mode: str, deployed_app: TestClient, mocker: MockerFixture
+    ) -> None:
+        inference = mocker.patch("immich_ml.main.run_inference", new_callable=mock.AsyncMock)
+        files = (
+            {}
+            if mode == "missing"
+            else {"audio": ("chunk.wav", b"bad" if mode == "invalid" else self.wav(), "audio/wav")}
+        )
+        data = {"entries": json.dumps({"speech-to-text": {"transcription": {"modelName": "SenseVoiceSmall"}}})}
+        if mode == "mixed":
+            data["text"] = "hello"
+        if mode == "image-task":
+            data["entries"] = json.dumps({"clip": {"textual": {"modelName": "ViT-B-32__openai"}}})
+        result = deployed_app.post("/predict", data=data, files=files)
+        assert result.status_code in (400, 422)
+        inference.assert_not_called()
+
+    def test_ctc_decoding_language_and_window_duration(self, mocker: MockerFixture, tmp_path: Path) -> None:
+        from immich_ml.models.speech.recognition import SpeechRecognizer
+        from immich_ml.schemas import AudioInput, SpeechTranscriptionOptions
+
+        session = mock.Mock()
+        model = SpeechRecognizer("SenseVoiceSmall", cache_dir=tmp_path, session=session)
+        model.tokens = {0: "<blank>", 1: "<|zh|>", 2: "你", 3: "好", 4: "<|NEUTRAL|>"}
+        model.language_ids = {"zh": 3}
+        model.text_norm = 14
+        indices = [1, 4, 2, 2, 0, 3, 3]
+        logits = np.zeros((1, len(indices), 5), dtype=np.float32)
+        logits[0, np.arange(len(indices)), indices] = 1
+        session.for_shape.return_value.run.return_value = [logits]
+        mocker.patch.object(model, "_features", return_value=np.ones((5, 560), dtype=np.float32))
+        result = model.predict(
+            AudioInput(np.ones(1600, dtype=np.float32)), options=SpeechTranscriptionOptions(language="zh")
+        )
+        assert result == {"text": "你好", "language": "zh", "segments": [{"startMs": 0, "endMs": 100, "text": "你好"}]}
+        feed = session.for_shape.return_value.run.call_args.args[1]
+        assert feed["language"].tolist() == [3]
+        assert feed["text_norm"].tolist() == [14]
+        assert feed["x_length"].tolist() == [5]
+
+    def test_silence_is_empty_without_graph_inference(self, tmp_path: Path) -> None:
+        from immich_ml.models.speech.recognition import SpeechRecognizer
+        from immich_ml.schemas import AudioInput, SpeechTranscriptionOptions
+
+        session = mock.Mock()
+        model = SpeechRecognizer("SenseVoiceSmall", cache_dir=tmp_path, session=session)
+        assert model.predict(AudioInput(np.zeros(1600, dtype=np.float32)), options=SpeechTranscriptionOptions()) == {
+            "text": "",
+            "language": None,
+            "segments": [],
+        }
+        session.for_shape.assert_not_called()

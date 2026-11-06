@@ -59,7 +59,11 @@
   const isOwner = $derived(authManager.authenticated && asset.ownerId === authManager.user.id);
   const isLocked = $derived(asset.visibility === AssetVisibility.Locked);
 
-  const { Cast } = $derived(getGlobalActions($t));
+  const globalActions = $derived(getGlobalActions($t));
+  const Cast = $derived({
+    ...globalActions.Cast,
+    $if: () => asset.type !== AssetTypeEnum.Audio && !!globalActions.Cast.$if?.(),
+  });
 
   const Close: ActionItem = $derived({
     title: $t('go_back'),
@@ -95,7 +99,7 @@
     class="dark -m-1 flex items-center gap-2 overflow-x-auto p-1 *:shrink-0"
     data-testid="asset-viewer-navbar-actions"
   >
-    {#if assetViewerManager.isImageLoading}
+    {#if asset.type !== AssetTypeEnum.Audio && assetViewerManager.isImageLoading}
       <Tooltip text={$t('loading')}>
         {#snippet child({ props })}
           <div {...props} role="status" aria-label={$t('loading')}>
@@ -171,6 +175,8 @@
           <ActionMenuItem action={Actions.RefreshMetadataJob} />
           <ActionMenuItem action={Actions.RegenerateThumbnailJob} />
           <ActionMenuItem action={Actions.TranscodeVideoJob} />
+          <ActionMenuItem action={Actions.GenerateWaveformJob} />
+          <ActionMenuItem action={Actions.TranscribeAudioJob} />
         {/if}
       </ButtonContextMenu>
     {/if}

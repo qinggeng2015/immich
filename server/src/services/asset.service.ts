@@ -33,6 +33,7 @@ import {
   AssetStatus,
   AssetType,
   AssetVisibility,
+  AudioAnalysisStatus,
   JobName,
   JobStatus,
   Permission,
@@ -48,10 +49,17 @@ import {
   onBeforeLink,
   onBeforeUnlink,
 } from 'src/utils/asset.util.js';
+import { isCurrentAudioSource } from 'src/utils/audio-summary.js';
 import { updateLockedColumns } from 'src/utils/database.js';
 import { extractTimeZone } from 'src/utils/date.js';
-import { batched, findOrFail } from 'src/utils/misc.js';
+import { batched, findOrFail, isAudioSummaryEnabled, isSpeechToTextEnabled } from 'src/utils/misc.js';
 import { transformOcrBoundingBox } from 'src/utils/transform.js';
+
+type AudioAnalysisJobName =
+  AssetJobName.GENERATE_WAVEFORM | AssetJobName.TRANSCRIBE_AUDIO | AssetJobName.SUMMARIZE_AUDIO;
+
+const isAudioAnalysisJob = (name: AssetJobName): name is AudioAnalysisJobName =>
+  [AssetJobName.GENERATE_WAVEFORM, AssetJobName.TRANSCRIBE_AUDIO, AssetJobName.SUMMARIZE_AUDIO].includes(name);
 
 @Injectable()
 export class AssetService extends BaseService {
@@ -461,6 +469,66 @@ export class AssetService extends BaseService {
 
   async run(auth: AuthDto, dto: AssetJobsDto) {
     await this.requireAccess({ auth, permission: Permission.AssetUpdate, ids: dto.assetIds });
+
+    if (isAudioAnalysisJob(dto.name)) {
+      const assets = await this.assetRepository.getByIds(dto.assetIds);
+      if (
+        assets.length !== new Set(dto.assetIds).size ||
+        assets.some(
+          (asset) =>
+            asset.type !== AssetType.Audio ||
+            asset.deletedAt ||
+            asset.isOffline ||
+            asset.visibility === AssetVisibility.Hidden,
+        )
+      ) {
+        throw new BadRequestException('Audio analysis requires available audio assets');
+      }
+      const transcript = dto.name === AssetJobName.TRANSCRIBE_AUDIO;
+      if (transcript) {
+        const { machineLearning } = await this.getConfig({ withCache: false });
+        if (!isSpeechToTextEnabled(machineLearning)) {
+          throw new BadRequestException('Speech recognition is disabled');
+        }
+      }
+      const summary = dto.name === AssetJobName.SUMMARIZE_AUDIO;
+      if (summary) {
+        if (auth.sharedLink) {
+          throw new BadRequestException('Audio summaries are unavailable through shared links');
+        }
+        const { machineLearning } = await this.getConfig({ withCache: false });
+        if (!isAudioSummaryEnabled(machineLearning)) {
+          throw new BadRequestException('Audio summaries are disabled');
+        }
+        for (const asset of assets) {
+          const analysis = await this.audioAnalysisRepository.get(asset.id);
+          if (
+            !analysis?.transcript?.text.trim() ||
+            !isCurrentAudioSource(analysis.transcriptChecksum, analysis.transcriptSourceModifiedAt, asset)
+          ) {
+            throw new BadRequestException('Audio summaries require a current nonempty transcript');
+          }
+        }
+      }
+      const kind = summary ? 'summary' : transcript ? 'transcript' : 'waveform';
+      const ids = assets.map(({ id }) => id);
+      await this.audioAnalysisRepository.setStatus(ids, kind, AudioAnalysisStatus.Pending);
+      try {
+        await this.jobRepository.queueAll(
+          ids.map((id) =>
+            summary
+              ? { name: JobName.AssetSummarize, data: { id, force: true, manual: true } }
+              : transcript
+                ? { name: JobName.AssetTranscribe, data: { id, force: true, manual: true } }
+                : { name: JobName.AssetGenerateWaveform, data: { id, force: true } },
+          ),
+        );
+      } catch (error) {
+        await this.audioAnalysisRepository.setStatus(ids, kind, AudioAnalysisStatus.Failed);
+        throw error;
+      }
+      return;
+    }
 
     const jobs: JobItem[] = [];
 

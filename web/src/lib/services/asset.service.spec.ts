@@ -1,11 +1,12 @@
 import { authManager } from '#lib/managers/auth-manager.svelte.ts';
+import { featureFlagsManager } from '#lib/managers/feature-flags-manager.svelte.ts';
 import { queryClient } from '#lib/queries/client.ts';
 import { getUserConfigQuery } from '#lib/queries/config-user.query.ts';
 import { getAssetActions, handleDownloadAsset } from '#lib/services/asset.service.ts';
 import { setSharedLink } from '#lib/utils.ts';
 import { getFormatter } from '#lib/utils/i18n.ts';
 import { factory } from '#test/unit/factories.ts';
-import { getAssetInfo, type UserConfigDto } from '@immich/sdk';
+import { AssetTypeEnum, getAssetInfo, type UserConfigDto } from '@immich/sdk';
 import { toastManager } from '@immich/ui';
 import { vitest } from 'vitest';
 
@@ -27,6 +28,7 @@ vitest.mock('#lib/utils.js', async () => {
   return {
     ...originalModule,
     sleep: vitest.fn(),
+    downloadUrl: vitest.fn(),
   };
 });
 
@@ -53,6 +55,38 @@ describe('AssetService', () => {
       setSharedLink(factory.sharedLink({ allowDownload: false }));
       const assetActions = getAssetActions(() => '', asset);
       expect(assetActions.SharedLinkDownload.$if?.()).toStrictEqual(true);
+    });
+
+    it('gates audio processing actions on ownership, capability and enabled transcription', () => {
+      const user = factory.user();
+      authManager.setUser(user);
+      vitest.spyOn(featureFlagsManager, 'supportsAudioWaveform', 'get').mockReturnValue(true);
+      vitest.spyOn(featureFlagsManager, 'supportsSpeechToText', 'get').mockReturnValue(true);
+      const asset = factory.asset({ ownerId: user.id, type: AssetTypeEnum.Audio });
+      const actions = getAssetActions(() => '', asset);
+
+      expect(actions.GenerateWaveformJob.$if?.()).toBe(true);
+      expect(actions.TranscribeAudioJob.$if?.()).toBe(false);
+      queryClient.setQueryData(getUserConfigQuery().queryKey, {
+        machineLearning: {
+          enabled: true,
+          clip: { enabled: false },
+          duplicateDetection: { enabled: false },
+          facialRecognition: { enabled: false },
+          ocr: { enabled: false },
+          speechToText: { enabled: true, autoTranscribe: false },
+        },
+      } as UserConfigDto);
+      expect(actions.TranscribeAudioJob.$if?.()).toBe(true);
+      expect(getAssetActions(() => '', { ...asset, ownerId: 'another-user' }).TranscribeAudioJob.$if?.()).toBe(false);
+      const config = queryClient.getQueryData<UserConfigDto>(getUserConfigQuery().queryKey)!;
+      queryClient.setQueryData(getUserConfigQuery().queryKey, {
+        ...config,
+        machineLearning: { ...config.machineLearning, enabled: false },
+      });
+      expect(actions.TranscribeAudioJob.$if?.()).toBe(false);
+      vitest.spyOn(featureFlagsManager, 'supportsAudioWaveform', 'get').mockReturnValue(false);
+      expect(actions.GenerateWaveformJob.$if?.()).toBe(false);
     });
 
     it('should not allow shared link downloads if the user does not own the asset and shared link downloads are disabled', () => {

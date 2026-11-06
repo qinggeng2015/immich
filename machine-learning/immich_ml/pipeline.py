@@ -12,11 +12,13 @@ from .models.facial_recognition.detection import FaceDetector
 from .models.facial_recognition.recognition import FaceRecognizer
 from .models.ocr.detection import TextDetector
 from .models.ocr.recognition import TextRecognizer
+from .models.speech.recognition import SpeechRecognizer
 from .schemas import (
     FaceDetectionOptions,
     FaceRecognitionOptions,
     ModelSource,
     Options,
+    SpeechTranscriptionOptions,
     TextDetectionOptions,
     TextRecognitionOptions,
     TextualOptions,
@@ -63,12 +65,19 @@ class Ocr:
 
 @with_config(STRICT)
 @dataclass(frozen=True)
+class SpeechToText:
+    transcription: Slot[SpeechTranscriptionOptions] | None = None
+
+
+@with_config(STRICT)
+@dataclass(frozen=True)
 class PipelineRequest:
     clip: Clip = field(default_factory=Clip)
     facial_recognition: Annotated[FacialRecognition, Field(alias="facial-recognition")] = field(
         default_factory=FacialRecognition
     )
     ocr: Ocr = field(default_factory=Ocr)
+    speech_to_text: Annotated[SpeechToText, Field(alias="speech-to-text")] = field(default_factory=SpeechToText)
 
     def entries(self) -> Iterator[InferenceEntry[Any]]:
         if (visual := self.clip.visual) is not None:
@@ -83,3 +92,5 @@ class PipelineRequest:
             yield boxes.entry(TextDetector)
         if (reading := self.ocr.recognition) is not None:
             yield reading.entry(TextRecognizer)
+        if (speech := self.speech_to_text.transcription) is not None:
+            yield speech.entry(SpeechRecognizer)

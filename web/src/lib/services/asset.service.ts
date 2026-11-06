@@ -3,12 +3,14 @@ import { assetMultiSelectManager } from '#lib/managers/asset-multi-select-manage
 import { assetViewerManager } from '#lib/managers/asset-viewer-manager.svelte.ts';
 import { authManager } from '#lib/managers/auth-manager.svelte.ts';
 import { eventManager } from '#lib/managers/event-manager.svelte.ts';
+import { featureFlagsManager } from '#lib/managers/feature-flags-manager.svelte.ts';
 import type { TimelineAsset } from '#lib/managers/timeline-manager/types.ts';
 import AssetAddToAlbumModal from '#lib/modals/AssetAddToAlbumModal.svelte';
 import AssetTagModal from '#lib/modals/AssetTagModal.svelte';
 import ProfileImageCropperModal from '#lib/modals/ProfileImageCropperModal.svelte';
 import SharedLinkCreateModal from '#lib/modals/SharedLinkCreateModal.svelte';
 import { removeAssetFromAlbumMutation } from '#lib/queries/album.query.ts';
+import { runAudioAssetJobMutation } from '#lib/queries/asset-audio.query.ts';
 import { executeMutation, readPreloadedQuery } from '#lib/queries/client.ts';
 import { getUserConfigQuery } from '#lib/queries/config-user.query.ts';
 import { Route } from '#lib/route.ts';
@@ -62,6 +64,8 @@ import {
   mdiTagMultipleOutline,
   mdiTagPlusOutline,
   mdiTune,
+  mdiWaveform,
+  mdiMicrophoneMessage,
 } from '@mdi/js';
 import type { MessageFormatter } from 'svelte-i18n';
 import { t } from 'svelte-i18n';
@@ -140,6 +144,7 @@ export const getAssetBulkActions = ($t: MessageFormatter, album?: AlbumResponseD
     title: $t('refresh_faces'),
     icon: mdiHeadSyncOutline,
     onAction: () => onAction(AssetJobName.RefreshFaces),
+    $if: () => ownedAssets.every((asset) => !asset.isAudio),
   };
 
   const RefreshMetadataJob: ActionItem = {
@@ -289,21 +294,21 @@ export const getAssetActions = (
   const ZoomIn: ActionItem = {
     title: $t('zoom_image'),
     icon: mdiMagnifyPlusOutline,
-    $if: () => assetViewerManager.canZoomIn(),
+    $if: () => asset.type !== AssetTypeEnum.Audio && assetViewerManager.canZoomIn(),
     onAction: () => assetViewerManager.emit('Zoom'),
   };
 
   const ZoomOut: ActionItem = {
     title: $t('zoom_image'),
     icon: mdiMagnifyMinusOutline,
-    $if: () => assetViewerManager.canZoomOut(),
+    $if: () => asset.type !== AssetTypeEnum.Audio && assetViewerManager.canZoomOut(),
     onAction: () => assetViewerManager.emit('Zoom'),
   };
 
   const Copy: ActionItem = {
     title: $t('copy_image'),
     icon: mdiContentCopy,
-    $if: () => assetViewerManager.canCopyImage(),
+    $if: () => asset.type !== AssetTypeEnum.Audio && assetViewerManager.canCopyImage(),
     onAction: () => assetViewerManager.emit('Copy'),
   };
 
@@ -365,7 +370,11 @@ export const getAssetActions = (
     title: $t('view_similar_photos'),
     icon: mdiCompare,
     $if: () =>
-      asset.visibility !== AssetVisibility.Locked && !asset.isArchived && !asset.isTrashed && smartSearchEnabled,
+      asset.type !== AssetTypeEnum.Audio &&
+      asset.visibility !== AssetVisibility.Locked &&
+      !asset.isArchived &&
+      !asset.isTrashed &&
+      smartSearchEnabled,
     onAction: () => goto(Route.search({ queryAssetId: asset.stackPrimaryAssetId ?? asset.id })),
   };
 
@@ -373,6 +382,7 @@ export const getAssetActions = (
     title: $t('refresh_faces'),
     icon: mdiHeadSyncOutline,
     onAction: () => handleRunAssetJob({ name: AssetJobName.RefreshFaces, assetIds: [asset.id] }),
+    $if: () => asset.type !== AssetTypeEnum.Audio,
   };
 
   const RefreshMetadataJob: ActionItem = {
@@ -392,6 +402,24 @@ export const getAssetActions = (
     icon: mdiCogRefreshOutline,
     onAction: () => handleRunAssetJob({ name: AssetJobName.TranscodeVideo, assetIds: [asset.id] }),
     $if: () => asset.type === AssetTypeEnum.Video,
+  };
+
+  const GenerateWaveformJob: ActionItem = {
+    title: $t('regenerate_audio_waveform'),
+    icon: mdiWaveform,
+    onAction: () => executeMutation(() => runAudioAssetJobMutation(AssetJobName.GenerateWaveform, [asset.id])),
+    $if: () => isOwner && asset.type === AssetTypeEnum.Audio && featureFlagsManager.supportsAudioWaveform,
+  };
+
+  const TranscribeAudioJob: ActionItem = {
+    title: $t('transcribe_audio'),
+    icon: mdiMicrophoneMessage,
+    onAction: () => executeMutation(() => runAudioAssetJobMutation(AssetJobName.TranscribeAudio, [asset.id])),
+    $if: () =>
+      isOwner &&
+      asset.type === AssetTypeEnum.Audio &&
+      featureFlagsManager.supportsSpeechToText &&
+      !!readPreloadedQuery(getUserConfigQuery()).machineLearning.speechToText?.enabled,
   };
 
   return {
@@ -422,6 +450,8 @@ export const getAssetActions = (
     RefreshMetadataJob,
     RegenerateThumbnailJob,
     TranscodeVideoJob,
+    GenerateWaveformJob,
+    TranscribeAudioJob,
   };
 };
 
@@ -650,6 +680,9 @@ const getAssetJobMessage = ($t: MessageFormatter, job: AssetJobName) => {
     [AssetJobName.RefreshMetadata]: $t('refreshing_metadata'),
     [AssetJobName.RegenerateThumbnail]: $t('regenerating_thumbnails'),
     [AssetJobName.TranscodeVideo]: $t('refreshing_encoded_video'),
+    [AssetJobName.GenerateWaveform]: $t('enqueued'),
+    [AssetJobName.TranscribeAudio]: $t('enqueued'),
+    [AssetJobName.SummarizeAudio]: $t('enqueued'),
   };
 
   return messages[job];

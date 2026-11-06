@@ -88,33 +88,22 @@ export class Spy<TCall, TExpected = TCall> {
   }
 }
 
-export class SeededRandom {
-  constructor(private seed: number) {}
+export { SeededRandom } from '#test/medium/mock/random.ts';
 
-  next() {
-    this.seed = (this.seed * 1_664_525 + 1_013_904_223) % 2_147_483_647;
-    return this.seed / 2_147_483_647;
-  }
-
-  nextInt(min: number, max: number) {
-    return Math.floor(this.next() * (max - min)) + min;
-  }
-
-  pick<T>(items: readonly T[]): T {
-    if (items.length === 0) {
-      throw new Error('Cannot pick from an empty list');
-    }
-    return items[this.nextInt(0, items.length)];
-  }
-
-  pickMany<T>(items: readonly T[], count: number): T[] {
-    if (count > items.length) {
-      throw new Error(`Cannot pick ${count} items from a list of ${items.length}`);
-    }
-    const indexes = new Set<number>();
-    while (indexes.size < count) {
-      indexes.add(this.nextInt(0, items.length));
-    }
-    return [...indexes].map((index) => items[index]);
-  }
-}
+export const silentAudio = () => {
+  const samples = 80_000;
+  const buffer = Buffer.alloc(44 + samples * 2);
+  buffer.write('RIFF', 0);
+  buffer.writeUInt32LE(36 + samples * 2, 4);
+  buffer.write('WAVEfmt ', 8);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(1, 22);
+  buffer.writeUInt32LE(8000, 24);
+  buffer.writeUInt32LE(16_000, 28);
+  buffer.writeUInt16LE(2, 32);
+  buffer.writeUInt16LE(16, 34);
+  buffer.write('data', 36);
+  buffer.writeUInt32LE(samples * 2, 40);
+  return buffer;
+};

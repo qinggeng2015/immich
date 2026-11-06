@@ -10,19 +10,20 @@ class SearchApiRepository extends ApiRepository {
   const SearchApiRepository(this._api);
 
   Future<SearchResponseDto?> search(SearchFilter filter, int page) {
-    AssetTypeEnum? type;
-    if (filter.mediaType.index == AssetType.image.index) {
-      type = AssetTypeEnum.IMAGE;
-    } else if (filter.mediaType.index == AssetType.video.index) {
-      type = AssetTypeEnum.VIDEO;
-    }
+    final type = switch (filter.mediaType) {
+      AssetType.image => AssetTypeEnum.IMAGE,
+      AssetType.video => AssetTypeEnum.VIDEO,
+      AssetType.audio => AssetTypeEnum.AUDIO,
+      AssetType.other => null,
+    };
 
     final tagIds = filter.tags == null
         ? const Optional<List<String>>.absent()
         : Optional.present(filter.tags!.map((tag) => tag.id).toList());
 
-    if ((filter.context != null && filter.context!.isNotEmpty) ||
-        (filter.assetId != null && filter.assetId!.isNotEmpty)) {
+    if ((filter.transcript?.isEmpty ?? true) &&
+        ((filter.mediaType != AssetType.audio && filter.context != null && filter.context!.isNotEmpty) ||
+            (filter.assetId != null && filter.assetId!.isNotEmpty))) {
       return _api.searchSmart(
         SmartSearchDto(
           query: filter.context == null ? const Optional.absent() : Optional.present(filter.context),
@@ -54,16 +55,28 @@ class SearchApiRepository extends ApiRepository {
       );
     }
 
+    final filename =
+        filter.mediaType == AssetType.audio &&
+            (filter.filename?.isEmpty ?? true) &&
+            (filter.description?.isEmpty ?? true) &&
+            (filter.ocr?.isEmpty ?? true) &&
+            (filter.transcript?.isEmpty ?? true)
+        ? filter.context
+        : filter.filename;
+
     return _api.searchAssets(
       MetadataSearchDto(
-        originalFileName: filter.filename != null && filter.filename!.isNotEmpty
-            ? Optional.present(filter.filename)
+        originalFileName: filename != null && filename.isNotEmpty
+            ? Optional.present(filename)
             : const Optional.absent(),
         country: filter.location.country == null ? const Optional.absent() : Optional.present(filter.location.country),
         description: filter.description != null && filter.description!.isNotEmpty
             ? Optional.present(filter.description)
             : const Optional.absent(),
         ocr: filter.ocr != null && filter.ocr!.isNotEmpty ? Optional.present(filter.ocr) : const Optional.absent(),
+        transcript: filter.transcript != null && filter.transcript!.isNotEmpty
+            ? Optional.present(filter.transcript)
+            : const Optional.absent(),
         state: filter.location.state == null ? const Optional.absent() : Optional.present(filter.location.state),
         city: filter.location.city == null ? const Optional.absent() : Optional.present(filter.location.city),
         make: filter.camera.make == null ? const Optional.absent() : Optional.present(filter.camera.make),

@@ -1,7 +1,8 @@
 import type { JobItem } from 'src/types.js';
-import { AssetType, ImmichWorker, JobName, JobStatus, QueueName } from 'src/enum.js';
+import { AssetType, AudioAnalysisStatus, ImmichWorker, JobName, JobStatus, QueueName } from 'src/enum.js';
 import { JobService } from 'src/services/job.service.js';
 import { AssetFactory } from 'test/factories/asset.factory.js';
+import { getForAsset } from 'test/mappers.js';
 import { newUuid } from 'test/small.factory.js';
 import { ServiceMocks, newTestService } from 'test/utils.js';
 
@@ -68,6 +69,67 @@ describe(JobService.name, () => {
       expect(mocks.job.queue).not.toHaveBeenCalled();
       expect(mocks.job.queueAll).not.toHaveBeenCalled();
     });
+
+    it.each([
+      { enabled: true, speechEnabled: true, autoTranscribe: true, transcribe: true },
+      { enabled: true, speechEnabled: true, autoTranscribe: false, transcribe: false },
+      { enabled: true, speechEnabled: false, autoTranscribe: true, transcribe: false },
+      { enabled: false, speechEnabled: true, autoTranscribe: true, transcribe: false },
+    ])(
+      'should chain audio jobs without vision jobs: %j',
+      async ({ enabled, speechEnabled, autoTranscribe, transcribe }) => {
+        const asset = AssetFactory.create({ type: AssetType.Audio });
+        const data = { id: asset.id, source: 'upload' as const };
+        mocks.job.run.mockResolvedValue(JobStatus.Success);
+        mocks.asset.getByIdsWithAllRelationsButStacks.mockResolvedValue([{ ...getForAsset(asset), faces: [] }]);
+        mocks.audioAnalysis.setStatus.mockResolvedValue(undefined);
+        mocks.systemMetadata.get.mockResolvedValue({
+          machineLearning: { enabled, speechToText: { enabled: speechEnabled, autoTranscribe } },
+        });
+
+        await sut.onJobRun(QueueName.ThumbnailGeneration, { name: JobName.AssetGenerateThumbnails, data });
+
+        expect(mocks.job.queueAll).toHaveBeenCalledExactlyOnceWith([
+          { name: JobName.AssetGenerateWaveform, data: { id: asset.id } },
+          ...(transcribe ? [{ name: JobName.AssetTranscribe, data: { id: asset.id } }] : []),
+          { name: JobName.AssetEncodeVideo, data },
+        ]);
+        expect(mocks.audioAnalysis.setStatus.mock.calls).toEqual([
+          [[asset.id], 'waveform', AudioAnalysisStatus.Pending],
+          ...(transcribe ? [[[asset.id], 'transcript', AudioAnalysisStatus.Pending]] : []),
+        ]);
+        expect(mocks.websocket.clientSend).toHaveBeenCalledWith(
+          'on_upload_success',
+          asset.ownerId,
+          expect.objectContaining({ id: asset.id, type: AssetType.Audio }),
+        );
+      },
+    );
+
+    it.each([false, true])(
+      'should mark scheduled audio analysis failed if automatic enqueue fails: autoTranscribe=%s',
+      async (autoTranscribe) => {
+        const asset = AssetFactory.create({ type: AssetType.Audio });
+        const job: JobItem = { name: JobName.AssetGenerateThumbnails, data: { id: asset.id, source: 'upload' } };
+        const error = new Error('Redis unavailable');
+        mocks.job.run.mockResolvedValue(JobStatus.Success);
+        mocks.asset.getByIdsWithAllRelationsButStacks.mockResolvedValue([{ ...getForAsset(asset), faces: [] }]);
+        mocks.audioAnalysis.setStatus.mockResolvedValue(undefined);
+        mocks.systemMetadata.get.mockResolvedValue({ machineLearning: { speechToText: { autoTranscribe } } });
+        mocks.job.queueAll.mockRejectedValue(error);
+
+        await sut.onJobRun(QueueName.ThumbnailGeneration, job);
+
+        expect(mocks.audioAnalysis.setStatus.mock.calls).toEqual([
+          [[asset.id], 'waveform', AudioAnalysisStatus.Pending],
+          ...(autoTranscribe ? [[[asset.id], 'transcript', AudioAnalysisStatus.Pending]] : []),
+          [[asset.id], 'waveform', AudioAnalysisStatus.Failed],
+          ...(autoTranscribe ? [[[asset.id], 'transcript', AudioAnalysisStatus.Failed]] : []),
+        ]);
+        expect(mocks.event.emit).toHaveBeenCalledWith('JobError', { job, error });
+        expect(mocks.websocket.clientSend).not.toHaveBeenCalled();
+      },
+    );
 
     const tests: Array<{ item: JobItem; jobs: JobName[]; stub?: any }> = [
       {

@@ -27,6 +27,8 @@ class DownloadRepository {
 
   void Function(TaskStatusUpdate)? onVideoDownloadStatus;
 
+  void Function(TaskStatusUpdate)? onAudioDownloadStatus;
+
   void Function(TaskStatusUpdate)? onLivePhotoDownloadStatus;
 
   void Function(TaskProgressUpdate)? onTaskProgress;
@@ -45,6 +47,12 @@ class DownloadRepository {
     _downloader.registerCallbacks(
       group: kDownloadGroupVideo,
       taskStatusCallback: (update) => onVideoDownloadStatus?.call(update),
+      taskProgressCallback: (update) => onTaskProgress?.call(update),
+    );
+
+    _downloader.registerCallbacks(
+      group: kDownloadGroupAudio,
+      taskStatusCallback: (update) => onAudioDownloadStatus?.call(update),
       taskProgressCallback: (update) => onTaskProgress?.call(update),
     );
 
@@ -72,12 +80,23 @@ class DownloadRepository {
       return Future.value(const []);
     }
 
+    if (Platform.isAndroid && assets.any((asset) => asset.isAudio && asset.isRemoteOnly)) {
+      final permissions = _downloader.permissions;
+      var status = await permissions.status(PermissionType.androidSharedStorage);
+      if (status != PermissionStatus.granted) {
+        status = await permissions.request(PermissionType.androidSharedStorage);
+      }
+      if (status != PermissionStatus.granted) {
+        throw StateError('Shared audio storage permission was not granted');
+      }
+    }
+
     final length = Platform.isAndroid ? assets.length : assets.length * 2;
     final tasks = List.filled(length, _dummyTask);
     int taskIndex = 0;
     final headers = ApiService.getRequestHeaders();
     for (final asset in assets) {
-      if (!asset.isRemoteOnly) {
+      if (!asset.isRemoteOnly || (asset.isAudio && !Platform.isAndroid)) {
         continue;
       }
 
@@ -85,6 +104,20 @@ class DownloadRepository {
       final livePhotoVideoId = asset.livePhotoVideoId;
       final isVideo = asset.isVideo;
       final url = getOriginalUrlForRemoteId(id);
+
+      if (asset.isAudio) {
+        tasks[taskIndex++] = DownloadTask(
+          taskId: id,
+          url: url,
+          headers: headers,
+          filename: asset.name,
+          directory: '$kDownloadGroupAudio/$id',
+          baseDirectory: BaseDirectory.temporary,
+          updates: Updates.statusAndProgress,
+          group: kDownloadGroupAudio,
+        );
+        continue;
+      }
 
       // on iOS it cannot link the image, check if the filename has .MP extension
       // to avoid downloading the video part

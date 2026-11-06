@@ -1,0 +1,8 @@
+@@ -64,6 +64,6 @@
+         durationMs: mapValueOfType<double>(json, r'durationMs')!,
+         peaks: json[r'peaks'] is Iterable
+-            ? (json[r'peaks'] as Iterable).cast<double>().toList(growable: false)
++            ? (json[r'peaks'] as Iterable).map((value) => (value as num).toDouble()).toList(growable: false)
+             : const [],
+         version: AudioWaveformDtoVersionEnum.fromJson(json[r'version'])!,
+       );

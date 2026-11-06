@@ -78,6 +78,31 @@ RemoteAlbum createRemoteAlbum({
 }
 
 void main() {
+  test('audio keeps original export while hiding unsupported visual media actions', () {
+    for (final type in [AssetType.audio, AssetType.image, AssetType.video]) {
+      final context = ActionButtonContext(
+        asset: createRemoteAsset(type: type),
+        isOwner: true,
+        isArchived: false,
+        isStacked: false,
+        isInLockedView: false,
+        currentAlbum: null,
+        advancedTroubleshooting: false,
+        source: ActionSource.viewer,
+      );
+      for (final action in [
+        ActionButtonType.download,
+        ActionButtonType.similarPhotos,
+        ActionButtonType.setProfilePicture,
+        ActionButtonType.cast,
+      ]) {
+        expect(action.shouldShow(context), type != AssetType.audio, reason: '$type $action');
+      }
+      expect(ActionButtonType.share.shouldShow(context), isTrue);
+      expect(ActionButtonType.slideshow.shouldShow(context), isTrue);
+    }
+  });
+
   group('ActionButtonContext', () {
     test('should create context with all required parameters', () {
       final asset = createLocalAsset();

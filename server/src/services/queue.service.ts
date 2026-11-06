@@ -97,7 +97,7 @@ export class QueueService extends BaseService {
   private updateConcurrency(config: SystemConfig) {
     this.logger.debug(`Updating queue concurrency settings`);
     for (const queueName of Object.values(QueueName)) {
-      const concurrency = this.isConcurrentQueue(queueName) ? config.job[queueName].concurrency : 1;
+      const concurrency = this.isConcurrentQueue(queueName) ? (config.job[queueName]?.concurrency ?? 1) : 1;
       this.logger.debug(`Setting ${queueName} concurrency to ${concurrency}`);
       this.jobRepository.setConcurrency(queueName, concurrency);
     }
@@ -128,6 +128,7 @@ export class QueueService extends BaseService {
 
       case QueueCommand.Empty: {
         await this.jobRepository.empty(name);
+        await this.resetPendingAudio(name);
         break;
       }
 
@@ -143,8 +144,13 @@ export class QueueService extends BaseService {
     return mapQueueLegacy(response);
   }
 
-  async getAll(_auth: AuthDto): Promise<QueueResponseDto[]> {
-    return Promise.all(Object.values(QueueName).map((name) => this.getByName(name)));
+  async getAll(auth: AuthDto): Promise<QueueResponseDto[]> {
+    const queues = Object.values(QueueName).filter((name) =>
+      name === QueueName.AudioSummary
+        ? !!auth.audioSummarySupported
+        : auth.audioAnalysisSupported || (name !== QueueName.AudioWaveform && name !== QueueName.SpeechToText),
+    );
+    return Promise.all(queues.map((name) => this.getByName(name)));
   }
 
   async getAllLegacy(auth: AuthDto): Promise<QueuesResponseLegacyDto> {
@@ -175,8 +181,18 @@ export class QueueService extends BaseService {
 
   async emptyQueue(auth: AuthDto, name: QueueName, dto: QueueDeleteDto) {
     await this.jobRepository.empty(name);
+    await this.resetPendingAudio(name);
     if (dto.failed) {
       await this.jobRepository.clear(name, QueueCleanType.Failed);
+    }
+  }
+
+  private async resetPendingAudio(name: QueueName) {
+    if (name === QueueName.AudioSummary) {
+      await this.audioAnalysisRepository.resetPending('summary');
+    }
+    if (name === QueueName.AudioWaveform || name === QueueName.SpeechToText) {
+      await this.audioAnalysisRepository.resetPending(name === QueueName.AudioWaveform ? 'waveform' : 'transcript');
     }
   }
 
@@ -197,6 +213,18 @@ export class QueueService extends BaseService {
     await this.eventRepository.emit('QueueStart', { name });
 
     switch (name) {
+      case QueueName.AudioWaveform: {
+        return this.jobRepository.queue({ name: JobName.AssetGenerateWaveformQueueAll, data: { force } });
+      }
+
+      case QueueName.AudioSummary: {
+        return this.jobRepository.queue({ name: JobName.AssetSummarizeQueueAll, data: { force } });
+      }
+
+      case QueueName.SpeechToText: {
+        return this.jobRepository.queue({ name: JobName.AssetTranscribeQueueAll, data: { force } });
+      }
+
       case QueueName.VideoConversion: {
         return this.jobRepository.queue({ name: JobName.AssetEncodeVideoQueueAll, data: { force } });
       }

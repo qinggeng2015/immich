@@ -76,6 +76,20 @@
       missingText: $t('missing'),
       disabled: !machineLearning.ocr.enabled,
     },
+    [QueueName.AudioWaveform]: {
+      allText: $t('all'),
+      missingText: $t('missing'),
+    },
+    [QueueName.SpeechToText]: {
+      allText: $t('all'),
+      missingText: $t('missing'),
+      disabled: !machineLearning.speechToText?.enabled,
+    },
+    [QueueName.AudioSummary]: {
+      allText: $t('all'),
+      missingText: $t('missing'),
+      disabled: !machineLearning.audioSummary?.enabled,
+    },
     [QueueName.VideoConversion]: {
       allText: $t('all'),
       missingText: $t('missing'),

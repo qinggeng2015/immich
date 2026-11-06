@@ -26,7 +26,9 @@ final _stateProvider = Provider.family.autoDispose<_State?, ActionSource>((ref, 
   final ownedRemote = <RemoteAsset>[];
   for (final asset in assets) {
     if (asset.localId case final localId?) {
-      localIds.add(localId);
+      if (!localId.startsWith('audio-file:') && !localId.startsWith('saf-file:')) {
+        localIds.add(localId);
+      }
     }
     if (asset case final RemoteAsset remote when remote.ownerId == authUserId) {
       ownedRemote.add(remote);
@@ -165,7 +167,12 @@ class DeleteAction extends AssetActionBuilder {
 
 final _cleanupStateProvider = Provider.family.autoDispose<List<String>?, ActionSource>((ref, source) {
   final assets = ref.watch(assetsActionProvider(source));
-  final assetIds = assets.backedUp().map((asset) => asset.localId).nonNulls.toList(growable: false);
+  final assetIds = assets
+      .backedUp()
+      .map((asset) => asset.localId)
+      .nonNulls
+      .where((id) => !id.startsWith('audio-file:') && !id.startsWith('saf-file:'))
+      .toList(growable: false);
   return assetIds.isEmpty ? null : assetIds;
 }, dependencies: [assetsActionProvider]);
 

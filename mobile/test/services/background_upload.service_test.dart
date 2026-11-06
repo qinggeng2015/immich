@@ -10,9 +10,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:immich_mobile/constants/constants.dart';
 import 'package:immich_mobile/data/db/main/database.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
+import 'package:immich_mobile/domain/models/settings_key.dart';
 import 'package:immich_mobile/domain/models/store.model.dart';
 import 'package:immich_mobile/domain/services/store.service.dart';
 import 'package:immich_mobile/entities/store.entity.dart';
+import 'package:immich_mobile/infrastructure/repositories/audio_support.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/settings.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/store.repository.dart';
 import 'package:immich_mobile/services/background_upload.service.dart';
@@ -23,6 +25,8 @@ import '../infrastructure/repository.mock.dart';
 import '../mocks/asset_entity.mock.dart';
 import '../repository.mocks.dart';
 import '../service.mocks.dart';
+
+class MockAudioSupportRepository extends Mock implements AudioSupportRepository {}
 
 void main() {
   late BackgroundUploadService sut;
@@ -75,6 +79,47 @@ void main() {
   });
 
   group('getUploadTask', () {
+    test('does not enqueue audio for servers without audio support', () async {
+      final asset = LocalAssetStub.image1.copyWith(type: AssetType.audio, name: 'recording.m4a');
+      expect(await sut.getUploadTask(asset), isNull);
+      verifyZeroInteractions(mockStorageRepository);
+    });
+
+    test('builds an audio task without requiring a Photos entity', () async {
+      final support = MockAudioSupportRepository();
+      when(support.isSupported).thenAnswer((_) async => true);
+      sut.dispose();
+      sut = BackgroundUploadService(
+        mockUploadRepository,
+        mockStorageRepository,
+        mockLocalAssetRepository,
+        mockBackupRepository,
+        mockAssetMediaRepository,
+        mockAssetService,
+        audioSupport: support,
+      );
+      final asset = LocalAssetStub.image1.copyWith(
+        id: 'audio-file:folder:recording',
+        type: AssetType.audio,
+        name: 'recording.m4a',
+      );
+      when(() => mockStorageRepository.getFileForAsset(asset.id)).thenAnswer((_) async => File('/tmp/recording.m4a'));
+      final task = await sut.getUploadTask(asset);
+      expect(task, isNotNull);
+      expect(task!.fields['filename'], 'recording.m4a');
+      expect(task.requiresWiFi, isTrue);
+      expect(task.fields.containsKey('livePhotoVideoId'), isFalse);
+      verifyNever(() => mockStorageRepository.getAssetEntityForAsset(asset));
+
+      try {
+        await SettingsRepository.instance.write(SettingsKey.backupUseCellularForAudio, true);
+        final cellularTask = await sut.getUploadTask(asset);
+        expect(cellularTask!.requiresWiFi, isFalse);
+      } finally {
+        await SettingsRepository.instance.clear([SettingsKey.backupUseCellularForAudio]);
+      }
+    });
+
     test('should call getOriginalFilename from AssetMediaRepository for regular photo', () async {
       final asset = LocalAssetStub.image1;
       final mockEntity = MockAssetEntity();

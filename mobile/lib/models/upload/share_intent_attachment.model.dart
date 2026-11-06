@@ -6,7 +6,7 @@ import 'package:path/path.dart';
 
 part 'share_intent_attachment.model.freezed.dart';
 
-enum ShareIntentAttachmentType { image, video }
+enum ShareIntentAttachmentType { image, video, audio }
 
 enum UploadStatus { enqueued, running, complete, failed }
 
@@ -29,6 +29,8 @@ abstract class ShareIntentAttachment with _$ShareIntentAttachment {
   String get fileName => basename(file.path);
 
   bool get isImage => type == ShareIntentAttachmentType.image;
+
+  bool get isAudio => type == ShareIntentAttachmentType.audio;
 
   // ignore: unused-code
   bool get isVideo => type == ShareIntentAttachmentType.video;

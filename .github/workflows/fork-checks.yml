@@ -1,0 +1,217 @@
+name: Fork Checks
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+      base_ref:
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  CI: 'true'
+
+jobs:
+  server:
+    name: Server unit and audio processing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Setup Mise
+        uses: immich-app/devtools/actions/use-mise@caac7f7e4298458a14238959504f411fc6cc7f06
+        with:
+          github_token: ${{ github.token }}
+      - name: Install and build dependencies
+        run: |
+          mise //server:install
+          mise //:plugins
+      - name: Check format, lint and types
+        run: |
+          mise //server:format
+          mise //server:lint
+          mise //server:check
+      - name: Run server unit tests
+        run: mise //server:test --run --maxWorkers=2
+      - name: Run real FFmpeg audio processing tests
+        run: mise //server:test-audio
+
+  server-medium:
+    name: Server database and integration tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout source and public fixtures
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+          submodules: recursive
+      - name: Setup Mise
+        uses: immich-app/devtools/actions/use-mise@caac7f7e4298458a14238959504f411fc6cc7f06
+        with:
+          github_token: ${{ github.token }}
+      - name: Install and build dependencies
+        run: |
+          mise //server:install
+          mise //:plugins
+      - name: Run all server medium tests
+        run: mise //server:test-medium --run --maxWorkers=2
+
+  web:
+    name: Web unit and browser tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Setup Mise
+        uses: immich-app/devtools/actions/use-mise@caac7f7e4298458a14238959504f411fc6cc7f06
+        with:
+          github_token: ${{ github.token }}
+      - name: Install and build SDK
+        run: |
+          mise //:sdk:install
+          mise //:sdk:build
+          mise //web:install
+      - name: Check format, lint and types
+        run: |
+          mise //web:format
+          mise //web:lint
+          mise //web:check
+      - name: Run all web unit tests
+        run: mise //web:test --run --maxWorkers=2
+      - name: Install Chromium dependencies
+        run: mise //web:playwright-install --with-deps
+      - name: Build and run all browser tests
+        run: mise //web:test-medium --workers=2
+      - name: Preserve browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: fork-web-browser-results
+          path: |
+            web/playwright-report/
+            web/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  machine-learning:
+    name: CPU machine learning checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      UV_PYTHON: '3.13'
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Setup Mise
+        uses: immich-app/devtools/actions/use-mise@caac7f7e4298458a14238959504f411fc6cc7f06
+        with:
+          github_token: ${{ github.token }}
+          working_directory: ./machine-learning
+      - name: Install locked CPU dependencies
+        run: mise //machine-learning:install --extra cpu
+      - name: Check Python formatting and types
+        run: |
+          mise //machine-learning:format --check
+          mise //machine-learning:lint
+          mise //machine-learning:check
+      - name: Run CPU unit tests without model downloads
+        run: mise //machine-learning:test
+
+  generated-schema:
+    name: Generated clients, SQL and migrations
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      DB_URL: postgres://postgres:postgres@127.0.0.1:5432/immich
+    services:
+      postgres:
+        image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3@sha256:dbf18b3ffea4a81434c65b71e20d27203baf903a0275f4341e4c16dfd901fd67
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: immich
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - name: Checkout source and migration history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Setup Mise
+        uses: immich-app/devtools/actions/use-mise@caac7f7e4298458a14238959504f411fc6cc7f06
+        with:
+          github_token: ${{ github.token }}
+      - name: Regenerate complete API clients
+        run: mise //:open-api
+      - name: Check generated API consistency
+        run: git diff --exit-code -- open-api/immich-openapi-specs.json packages/sdk/src/fetch-client.ts
+      - name: Verify migration order and append-only history
+        env:
+          BASE_REF: ${{ inputs.base_ref }}
+          SOURCE_REF: ${{ inputs.ref }}
+        run: |
+          if [[ -z "$BASE_REF" || "$BASE_REF" == 0000000000000000000000000000000000000000 ]]; then
+            BASE_REF="${SOURCE_REF}^"
+          fi
+          BASE_SHA="$(git rev-parse --verify "${BASE_REF}^{commit}")"
+          git show "${BASE_SHA}:server/src/schema/migrations/ORDER" > "$RUNNER_TEMP/migration-order-baseline"
+          mise //server:migrations verify-order --append-only-from "$RUNNER_TEMP/migration-order-baseline"
+      - name: Apply and reset the isolated schema
+        run: |
+          mise //server:migrations run
+          mise //server:schema-reset
+      - name: Verify schema declarations match migrations
+        run: |
+          mise //server:migrations generate ForkSchemaCheck
+          test -z "$(git status --porcelain --untracked-files=all -- server)"
+      - name: Regenerate SQL snapshots
+        run: mise //:sql
+      - name: Check SQL snapshot consistency
+        run: git diff --exit-code -- server/src/queries
+
+  repository-format:
+    name: Workflow and translation formatting
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Setup Mise
+        uses: immich-app/devtools/actions/use-mise@caac7f7e4298458a14238959504f411fc6cc7f06
+        with:
+          github_token: ${{ github.token }}
+      - name: Install formatting tools
+        run: mise //.github:install
+      - name: Check workflow and translation files
+        run: |
+          mise //.github:format
+          mise //:i18n:format
+      - name: Verify release publication guards
+        run: mise //.github:release:test

@@ -20,6 +20,7 @@ env:
 
 jobs:
   pre-job:
+    if: ${{ github.repository == 'immich-app/immich' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -76,7 +77,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    if: ${{ fromJSON(needs.pre-job.outputs.should_run).machine-learning == false && !github.event.pull_request.head.repo.fork && !startsWith(github.ref, 'refs/heads/release/') && !startsWith(github.base_ref, 'release/') }}
+    if: ${{ github.repository == 'immich-app/immich' && (fromJSON(needs.pre-job.outputs.should_run).machine-learning == false && !github.event.pull_request.head.repo.fork && !startsWith(github.ref, 'refs/heads/release/') && !startsWith(github.base_ref, 'release/')) }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -130,7 +131,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    if: ${{ fromJSON(needs.pre-job.outputs.should_run).server == false && !github.event.pull_request.head.repo.fork && !startsWith(github.ref, 'refs/heads/release/') && !startsWith(github.base_ref, 'release/') }}
+    if: ${{ github.repository == 'immich-app/immich' && (fromJSON(needs.pre-job.outputs.should_run).server == false && !github.event.pull_request.head.repo.fork && !startsWith(github.ref, 'refs/heads/release/') && !startsWith(github.base_ref, 'release/')) }}
     runs-on: ubuntu-latest
     steps:
       - name: Login to GitHub Container Registry
@@ -154,7 +155,7 @@ jobs:
   machine-learning:
     name: Build and Push ML
     needs: pre-job
-    if: ${{ fromJSON(needs.pre-job.outputs.should_run).machine-learning == true }}
+    if: ${{ github.repository == 'immich-app/immich' && (fromJSON(needs.pre-job.outputs.should_run).machine-learning == true) }}
     strategy:
       fail-fast: false
       matrix:
@@ -185,7 +186,7 @@ jobs:
   server:
     name: Build and Push Server
     needs: pre-job
-    if: ${{ fromJSON(needs.pre-job.outputs.should_run).server == true }}
+    if: ${{ github.repository == 'immich-app/immich' && (fromJSON(needs.pre-job.outputs.should_run).server == true) }}
     uses: immich-app/devtools/.github/workflows/multi-runner-build.yml@4d420cf8e5ea499f99b2c2849ff9a219d5f7b178 # multi-runner-build-workflow-v4.0.0
     permissions:
       contents: read
@@ -202,7 +203,7 @@ jobs:
   mirror:
     name: Mirror to Docker Hub
     needs: [pre-job, machine-learning, server]
-    if: ${{ github.event_name == 'release' && github.event.release.prerelease == false }}
+    if: ${{ github.repository == 'immich-app/immich' && (github.event_name == 'release' && github.event.release.prerelease == false) }}
     permissions:
       packages: read
     runs-on: ubuntu-latest
@@ -254,7 +255,7 @@ jobs:
     needs: [server, retag_server, mirror]
     permissions: {}
     runs-on: ubuntu-latest
-    if: always()
+    if: ${{ github.repository == 'immich-app/immich' && (always()) }}
     steps:
       - uses: immich-app/devtools/actions/success-check@81113db03f6d743efee81e0058c0b43f6cd6f36d # success-check-action-v0.0.6
         with:
@@ -265,7 +266,7 @@ jobs:
     needs: [machine-learning, retag_ml, mirror]
     permissions: {}
     runs-on: ubuntu-latest
-    if: always()
+    if: ${{ github.repository == 'immich-app/immich' && (always()) }}
     steps:
       - uses: immich-app/devtools/actions/success-check@81113db03f6d743efee81e0058c0b43f6cd6f36d # success-check-action-v0.0.6
         with:

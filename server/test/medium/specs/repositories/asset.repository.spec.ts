@@ -76,6 +76,28 @@ const keyframeRow = (assetId: string, n: number) => ({
 });
 
 describe(AssetRepository.name, () => {
+  describe('getForVideo', () => {
+    it.each([AssetType.Audio, AssetType.Video])('should find playable %s assets', async (type) => {
+      const { ctx, sut } = setup();
+      const { user } = await ctx.newUser();
+      const { asset } = await ctx.newAsset({ ownerId: user.id, type });
+      await ctx.newAssetFile({ assetId: asset.id, type: AssetFileType.EncodedVideo, path: '/encoded.mp4' });
+
+      await expect(sut.getForVideo(asset.id)).resolves.toEqual({
+        originalPath: asset.originalPath,
+        encodedVideoPath: '/encoded.mp4',
+      });
+    });
+
+    it('should not serve images through the playback route', async () => {
+      const { ctx, sut } = setup();
+      const { user } = await ctx.newUser();
+      const { asset } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Image });
+
+      await expect(sut.getForVideo(asset.id)).resolves.toBeUndefined();
+    });
+  });
+
   describe('deleteFile', () => {
     it('should delete only the requested asset and file type', async () => {
       const { ctx, sut } = setup();

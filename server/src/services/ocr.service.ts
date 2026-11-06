@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 import type { JobOf } from 'src/types.js';
 import { OnJob } from 'src/decorators.js';
-import { AssetVisibility, JobName, JobStatus, QueueName } from 'src/enum.js';
+import { AssetType, AssetVisibility, JobName, JobStatus, QueueName } from 'src/enum.js';
 import { OCR } from 'src/repositories/machine-learning.repository.js';
 import { BaseService } from 'src/services/base.service.js';
 import { tokenizeForSearch } from 'src/utils/database.js';
@@ -36,6 +36,10 @@ export class OcrService extends BaseService {
     }
 
     const asset = await this.assetJobRepository.getForOcr(id);
+    if (asset?.type === AssetType.Audio) {
+      return JobStatus.Skipped;
+    }
+
     if (!asset || !asset.previewFile) {
       return JobStatus.Failed;
     }

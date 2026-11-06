@@ -79,6 +79,7 @@ class NativeSyncApiImpl: ImmichPlugin, NativeSyncApi, FlutterPlugin {
   }
   
   private func shouldFullSync() -> Bool {
+    if AudioFolderStore.shared.hasDirectories { return true }
     guard #available(iOS 16, *),
           PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized,
           let storedToken = getChangeToken() else {
@@ -135,6 +136,7 @@ class NativeSyncApiImpl: ImmichPlugin, NativeSyncApi, FlutterPlugin {
         albums.append(domainAlbum)
       }
     }
+    albums.append(contentsOf: AudioFolderStore.shared.albums())
     return albums.sorted { $0.id < $1.id }
   }
   
@@ -232,6 +234,9 @@ class NativeSyncApiImpl: ImmichPlugin, NativeSyncApi, FlutterPlugin {
   }
   
   private func getAssetIdsForAlbum(albumId: String) throws -> [String] {
+    if albumId.hasPrefix(AudioFolderStore.albumPrefix) {
+      return try AudioFolderStore.shared.assets(albumId).map(\.id)
+    }
     let collections = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [albumId], options: nil)
     guard let album = collections.firstObject else {
       return []
@@ -253,6 +258,9 @@ class NativeSyncApiImpl: ImmichPlugin, NativeSyncApi, FlutterPlugin {
   }
   
   func getAssetsCountSince(albumId: String, timestamp: Int64) throws -> Int64 {
+    if albumId.hasPrefix(AudioFolderStore.albumPrefix) {
+      return Int64(try AudioFolderStore.shared.assets(albumId, since: timestamp).count)
+    }
     let collections = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [albumId], options: nil)
     guard let album = collections.firstObject else {
       return 0
@@ -271,6 +279,9 @@ class NativeSyncApiImpl: ImmichPlugin, NativeSyncApi, FlutterPlugin {
   }
   
   private func getAssetsForAlbum(albumId: String, updatedTimeCond: Int64?) throws -> [PlatformAsset] {
+    if albumId.hasPrefix(AudioFolderStore.albumPrefix) {
+      return try AudioFolderStore.shared.assets(albumId, since: updatedTimeCond)
+    }
     let collections = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [albumId], options: nil)
     guard let album = collections.firstObject else {
       return []
@@ -309,7 +320,7 @@ class NativeSyncApiImpl: ImmichPlugin, NativeSyncApi, FlutterPlugin {
       var missingAssetIds = Set(assetIds)
       var assets = [PHAsset]()
       assets.reserveCapacity(assetIds.count)
-      PHAsset.fetchAssets(withLocalIdentifiers: assetIds, options: nil).enumerateObjects { (asset, _, stop) in
+      PHAsset.fetchAssets(withLocalIdentifiers: assetIds.filter { !$0.hasPrefix(AudioFolderStore.assetPrefix) }, options: nil).enumerateObjects { (asset, _, stop) in
         if Task.isCancelled {
           stop.pointee = true
           return
@@ -343,7 +354,14 @@ class NativeSyncApiImpl: ImmichPlugin, NativeSyncApi, FlutterPlugin {
         }
         
         for missing in missingAssetIds {
-          results.append(HashResult(assetId: missing, error: "Asset not found in library", hash: nil))
+          if missing.hasPrefix(AudioFolderStore.assetPrefix) {
+            guard !Task.isCancelled, let result = AudioFolderStore.shared.hash(missing) else {
+              return self?.completeWhenActive(for: completion, with: Self.hashCancelled)
+            }
+            results.append(result)
+          } else {
+            results.append(HashResult(assetId: missing, error: "Asset not found in library", hash: nil))
+          }
         }
         
         return self?.completeWhenActive(for: completion, with: .success(results))

@@ -306,15 +306,17 @@ export class AssetMediaService extends BaseService {
     const asset = await this.assetRepository.getForVideo(id);
 
     if (!asset) {
-      throw new NotFoundException('Asset not found or asset is not a video');
+      throw new NotFoundException('Asset not found or asset is not playable media');
     }
 
     const filepath = asset.encodedVideoPath || asset.originalPath;
+    const isAudio = mimeTypes.isAudio(asset.originalPath);
 
     return new ImmichFileResponse({
       path: filepath,
-      contentType: mimeTypes.lookup(filepath),
-      cacheControl: CacheControl.PrivateWithCache,
+      contentType: asset.encodedVideoPath && isAudio ? 'audio/mp4' : mimeTypes.lookup(filepath),
+      cacheControl:
+        isAudio && !asset.encodedVideoPath ? CacheControl.PrivateWithoutCache : CacheControl.PrivateWithCache,
     });
   }
 

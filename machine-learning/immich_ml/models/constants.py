@@ -166,6 +166,9 @@ WEBLATE_TO_FLORES200 = {
 def get_model_source(model_name: str) -> ModelSource | None:
     cleaned_name = clean_name(model_name)
 
+    if cleaned_name == "SenseVoiceSmall":
+        return ModelSource.SENSEVOICE
+
     if cleaned_name in _INSIGHTFACE_MODELS:
         return ModelSource.INSIGHTFACE
 

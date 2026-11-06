@@ -27,6 +27,12 @@ import { AuthType, ImmichCookie, ImmichHeader, ImmichQuery, JobName, Permission 
 import { OAuthConfig, OAuthRawProfile } from 'src/repositories/oauth.repository.js';
 import { BaseService } from 'src/services/base.service.js';
 import { isGranted } from 'src/utils/access.js';
+import {
+  CLIENT_FEATURES_HEADER,
+  supportsAudio,
+  supportsAudioAnalysis,
+  supportsAudioSummary,
+} from 'src/utils/client-features.js';
 import { generateProfileImage } from 'src/utils/profile-image.js';
 import { getUserAgentDetails } from 'src/utils/request.js';
 
@@ -235,7 +241,12 @@ export class AuthService extends BaseService {
       throw new ForbiddenException(`Missing required permission: ${requestedPermission}`);
     }
 
-    return authDto;
+    return {
+      ...authDto,
+      ...(supportsAudio(headers[CLIENT_FEATURES_HEADER]) && { audioSupported: true }),
+      ...(supportsAudioAnalysis(headers[CLIENT_FEATURES_HEADER]) && { audioAnalysisSupported: true }),
+      ...(supportsAudioSummary(headers[CLIENT_FEATURES_HEADER]) && { audioSummarySupported: true }),
+    };
   }
 
   private async validate({ headers, queryParams }: Omit<ValidateRequest, 'metadata'>): Promise<AuthDto> {

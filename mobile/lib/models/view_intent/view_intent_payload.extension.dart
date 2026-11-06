@@ -16,8 +16,10 @@ extension ViewIntentPayloadX on ViewIntentPayload {
 
   bool get isVideo => mimeType.toLowerCase().startsWith('video/');
 
+  bool get isAudio => mimeType.toLowerCase().startsWith('audio/');
+
   AssetPlaybackStyle get playbackStyle {
-    if (isVideo) {
+    if (isVideo || isAudio) {
       return AssetPlaybackStyle.video;
     }
 

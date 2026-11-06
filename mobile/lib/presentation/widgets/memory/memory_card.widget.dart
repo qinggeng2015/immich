@@ -1,16 +1,19 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/memory.model.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
+import 'package:immich_mobile/presentation/widgets/asset_viewer/audio_cover.widget.dart';
 import 'package:immich_mobile/presentation/widgets/asset_viewer/video_viewer.widget.dart';
 import 'package:immich_mobile/presentation/widgets/images/full_image.widget.dart';
 import 'package:immich_mobile/presentation/widgets/images/image_provider.dart';
 import 'package:immich_mobile/presentation/widgets/images/thumb_hash_provider.dart';
 import 'package:immich_mobile/presentation/widgets/memory/memory_title.widget.dart';
+import 'package:immich_mobile/providers/asset_viewer/video_player_provider.dart';
 
-class MemoryCard extends StatelessWidget {
+class MemoryCard extends ConsumerWidget {
   final RemoteAsset asset;
   final Memory memory;
   final bool showTitle;
@@ -25,7 +28,8 @@ class MemoryCard extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final audioState = asset.isAudio ? ref.watch(videoPlayerProvider(asset.id)) : null;
     return Card(
       color: Colors.black,
       shape: const RoundedRectangleBorder(
@@ -38,13 +42,13 @@ class MemoryCard extends StatelessWidget {
           SizedBox.expand(child: _BlurredBackdrop(asset: asset)),
           LayoutBuilder(
             builder: (context, constraints) {
-              final r = asset.width != null && asset.height != null
-                  ? asset.width! / asset.height!
+              final r = !asset.isAudio && asset.hasDimensions
+                  ? asset.aspectRatio
                   : constraints.maxWidth / constraints.maxHeight;
 
               // Determine the fit using the aspect ratio
               BoxFit fit = BoxFit.contain;
-              if (asset.width != null && asset.height != null) {
+              if (!asset.isAudio && asset.hasDimensions) {
                 final phoneAspectRatio = constraints.maxWidth / constraints.maxHeight;
                 // Look for a 25% difference in either direction
                 if (phoneAspectRatio * .75 < r && phoneAspectRatio * 1.25 > r) {
@@ -64,7 +68,19 @@ class MemoryCard extends StatelessWidget {
                     key: ValueKey(asset.id),
                     asset: asset,
                     isCurrent: isCurrent,
-                    image: FullImage(asset, size: context.sizeData, fit: BoxFit.contain),
+                    image: asset.isAudio
+                        ? AudioCover(
+                            asset: asset,
+                            showName: true,
+                            durationOverride: audioState?.duration,
+                            isPlaying:
+                                audioState?.status == VideoPlaybackStatus.playing ||
+                                audioState?.status == VideoPlaybackStatus.buffering,
+                            onPressed: isCurrent
+                                ? () => ref.read(videoPlayerProvider(asset.id).notifier).toggle()
+                                : null,
+                          )
+                        : FullImage(asset, size: context.sizeData, fit: BoxFit.contain),
                   ),
                 ),
               );
@@ -93,6 +109,9 @@ class _BlurredBackdrop extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (asset.isAudio) {
+      return const ColoredBox(color: Colors.black);
+    }
     if (asset.thumbHash != null) {
       // Use a nice cheap blur hash image decoration
       return DecoratedBox(

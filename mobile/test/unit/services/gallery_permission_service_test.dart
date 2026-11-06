@@ -27,6 +27,34 @@ void main() {
   });
 
   group('DevicePermissionService', () {
+    test('audio permission denial leaves the image and video permission flow unchanged', () async {
+      when(mocks.permission.getAndroidSdkVersion).thenAnswer((_) async => 34);
+      stubPermissions({.photos: .granted, .videos: .granted, .mediaLocation: .granted, .audio: .denied});
+      expect(await sut.requestAudio(), DevicePermissionStatus.denied);
+      expect(await sut.requestGallery(), DevicePermissionStatus.granted);
+    });
+
+    test('audio permission can be granted while photos and videos are denied', () async {
+      when(mocks.permission.getAndroidSdkVersion).thenAnswer((_) async => 34);
+      stubPermissions({.photos: .denied, .videos: .denied, .audio: .granted});
+      expect(await sut.requestAudio(), DevicePermissionStatus.granted);
+      verifyNever(() => mocks.permission.repo.request(DevicePermission.photos));
+      verifyNever(() => mocks.permission.repo.request(DevicePermission.videos));
+    });
+
+    test('audio uses storage permission on Android 12 and older', () async {
+      when(mocks.permission.getAndroidSdkVersion).thenAnswer((_) async => 32);
+      stubPermissions({.storage: .granted});
+      expect(await sut.requestAudio(), DevicePermissionStatus.granted);
+      verifyNever(() => mocks.permission.repo.request(DevicePermission.audio));
+    });
+
+    test('audio does not request Android media permission on iOS', () async {
+      debugDefaultTargetPlatformOverride = .iOS;
+      expect(await sut.requestAudio(), DevicePermissionStatus.denied);
+      verifyNever(mocks.permission.request);
+    });
+
     group('Gallery', () {
       test('is denied when media location is missing but photos and videos are granted', () async {
         when(mocks.permission.getAndroidSdkVersion).thenAnswer((_) async => 34);

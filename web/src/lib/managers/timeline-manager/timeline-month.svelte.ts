@@ -183,6 +183,7 @@ export class TimelineMonth {
         bucketAssets.localOffsetHours[i],
       );
 
+      const isAudio = bucketAssets.isAudio?.at(i) ?? false;
       const timelineAsset: TimelineAsset = {
         city: bucketAssets.city?.[i] ?? null,
         country: bucketAssets.country?.[i] ?? null,
@@ -192,7 +193,8 @@ export class TimelineMonth {
         isFavorite: bucketAssets.isFavorite[i],
         isImage: bucketAssets.isImage[i],
         isTrashed: bucketAssets.isTrashed[i],
-        isVideo: !bucketAssets.isImage[i],
+        isVideo: !bucketAssets.isImage[i] && !isAudio,
+        isAudio,
         livePhotoVideoId: bucketAssets.livePhotoVideoId[i],
         localDateTime,
         createdAt: fromISODateTimeUTC(bucketAssets.createdAt[i]).toLocal().toObject(),

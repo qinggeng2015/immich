@@ -346,6 +346,35 @@ describe(AuthService.name, () => {
   });
 
   describe('validate - socket connections', () => {
+    it.each([
+      { features: 'audio', expected: { audioSupported: true } },
+      { features: 'audio-analysis', expected: { audioAnalysisSupported: true } },
+      { features: 'audio-summary', expected: { audioSummarySupported: true } },
+      { features: 'audio, audio-analysis', expected: { audioSupported: true, audioAnalysisSupported: true } },
+    ])('should attach $features support without changing cached authentication', async ({ features, expected }) => {
+      const session = SessionFactory.create();
+      const sessionWithToken = {
+        id: session.id,
+        updatedAt: session.updatedAt,
+        user: UserFactory.create(),
+        pinExpiresAt: null,
+        appVersion: null,
+        oauthSid: null,
+      };
+      mocks.session.getByToken.mockResolvedValue(sessionWithToken);
+      const request = {
+        headers: { authorization: 'Bearer auth_token', 'x-immich-features': features },
+        queryParams: {},
+        metadata: { adminRoute: false, sharedLinkRoute: false, uri: 'test' },
+      };
+
+      await expect(sut.authenticate(request)).resolves.toMatchObject(expected);
+      const legacyAuth = await sut.authenticate({ ...request, headers: { authorization: 'Bearer auth_token' } });
+      expect(legacyAuth.audioSupported).toBeUndefined();
+      expect(legacyAuth.audioAnalysisSupported).toBeUndefined();
+      expect(legacyAuth.audioSummarySupported).toBeUndefined();
+    });
+
     it('should throw when token is not provided', async () => {
       await expect(
         sut.authenticate({

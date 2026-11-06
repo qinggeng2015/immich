@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
+import 'package:immich_mobile/presentation/widgets/asset_viewer/audio_cover.widget.dart';
 import 'package:immich_mobile/presentation/widgets/images/image_provider.dart';
 import 'package:immich_mobile/presentation/widgets/images/progressive_image.widget.dart';
 import 'package:immich_mobile/widgets/asset_grid/thumbnail_placeholder.dart';
@@ -23,6 +24,10 @@ class FullImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (asset.isAudio) {
+      return AudioCover(asset: asset);
+    }
+
     final provider = getFullImageProvider(asset, size: size);
     return ProgressiveImage(
       provider: provider,

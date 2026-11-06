@@ -4,6 +4,7 @@
   import SettingAccordion from '#lib/components/shared-components/settings/SettingAccordion.svelte';
   import SettingInputField from '#lib/components/shared-components/settings/SettingInputField.svelte';
   import SettingSelect from './SettingSelect.svelte';
+  import AudioSummarySettings from './AudioSummarySettings.svelte';
   import SettingSwitch from '#lib/components/shared-components/settings/SettingSwitch.svelte';
   import SettingButtonsRow from '#lib/components/shared-components/settings/SystemConfigButtonRow.svelte';
   import { SettingInputFieldType } from '#lib/constants.ts';
@@ -337,6 +338,74 @@
           />
         </div>
       </SettingAccordion>
+      {#if configToEdit.machineLearning.speechToText && config.machineLearning.speechToText}
+        <SettingAccordion
+          key="speech-to-text"
+          title={$t('admin.machine_learning_audio_transcription')}
+          subtitle={$t('admin.machine_learning_audio_transcription_description')}
+        >
+          <div class="mt-4 ml-4 flex flex-col gap-4">
+            <SettingSwitch
+              title={$t('admin.machine_learning_audio_transcription_enabled')}
+              subtitle={$t('admin.machine_learning_audio_transcription_enabled_description')}
+              bind:checked={configToEdit.machineLearning.speechToText.enabled}
+              disabled={disabled || !configToEdit.machineLearning.enabled}
+            />
+            <SettingSwitch
+              title={$t('admin.machine_learning_audio_transcription_automatic')}
+              subtitle={$t('admin.machine_learning_audio_transcription_automatic_description')}
+              bind:checked={configToEdit.machineLearning.speechToText.autoTranscribe}
+              disabled={disabled ||
+                !configToEdit.machineLearning.enabled ||
+                !configToEdit.machineLearning.speechToText.enabled}
+            />
+            <SettingSelect
+              label={$t('admin.machine_learning_audio_transcription_model')}
+              desc={$t('admin.machine_learning_audio_transcription_model_description')}
+              name="speech-to-text-model"
+              bind:value={configToEdit.machineLearning.speechToText.modelName}
+              options={[{ text: 'SenseVoiceSmall', value: 'SenseVoiceSmall' }]}
+              disabled={disabled ||
+                !configToEdit.machineLearning.enabled ||
+                !configToEdit.machineLearning.speechToText.enabled}
+              isEdited={configToEdit.machineLearning.speechToText.modelName !==
+                config.machineLearning.speechToText.modelName}
+            />
+            <SettingSelect
+              label={$t('admin.machine_learning_audio_transcription_language')}
+              desc={$t('admin.machine_learning_audio_transcription_language_description')}
+              name="speech-to-text-language"
+              bind:value={configToEdit.machineLearning.speechToText.language}
+              options={[
+                { text: $t('audio_transcription_language_auto'), value: 'auto' },
+                { text: $t('audio_transcription_language_zh'), value: 'zh' },
+                { text: $t('audio_transcription_language_en'), value: 'en' },
+                { text: $t('audio_transcription_language_yue'), value: 'yue' },
+                { text: $t('audio_transcription_language_ja'), value: 'ja' },
+                { text: $t('audio_transcription_language_ko'), value: 'ko' },
+              ]}
+              disabled={disabled ||
+                !configToEdit.machineLearning.enabled ||
+                !configToEdit.machineLearning.speechToText.enabled}
+              isEdited={configToEdit.machineLearning.speechToText.language !==
+                config.machineLearning.speechToText.language}
+            />
+          </div>
+        </SettingAccordion>
+      {/if}
+      {#if featureFlagsManager.supportsAudioSummary && configToEdit.machineLearning.audioSummary && config.machineLearning.audioSummary}
+        <SettingAccordion
+          key="audio-summary"
+          title={$t('admin.machine_learning_audio_summary')}
+          subtitle={$t('admin.machine_learning_audio_summary_description')}
+        >
+          <AudioSummarySettings
+            saved={config.machineLearning.audioSummary}
+            bind:value={configToEdit.machineLearning.audioSummary}
+            disabled={disabled || !configToEdit.machineLearning.enabled}
+          />
+        </SettingAccordion>
+      {/if}
       <SettingButtonsRow bind:configToEdit keys={['machineLearning']} {disabled} />
     </form>
   </div>

@@ -1,7 +1,9 @@
 import { MediaType, QueryType, validQueryTypes } from '#lib/constants.ts';
+import { featureFlagsManager } from '#lib/managers/feature-flags-manager.svelte.ts';
 import { Route } from '#lib/route.ts';
 import type { SearchFilter } from '#lib/types.ts';
 import { asLocalTimeISO, parseUtcDate } from '#lib/utils/date-time.ts';
+import { normalizeAudioSearchQuery } from '#lib/utils/search.ts';
 import { AssetTypeEnum, AssetVisibility, type MetadataSearchDto, type SmartSearchDto } from '@immich/sdk';
 import type { DateTime } from 'luxon';
 import { SvelteSet } from 'svelte/reactivity';
@@ -14,6 +16,12 @@ class SearchManager {
 
   get filter() {
     return this.#filter;
+  }
+
+  get queryType() {
+    return this.filter.queryType === QueryType.TRANSCRIPT && !featureFlagsManager.supportsSpeechToText
+      ? QueryType.METADATA
+      : this.filter.queryType;
   }
 
   reset() {
@@ -34,6 +42,11 @@ class SearchManager {
   }
 
   #fromQuery(searchQuery: MetadataSearchDto | SmartSearchDto): SearchFilter {
+    searchQuery = normalizeAudioSearchQuery(
+      searchQuery,
+      featureFlagsManager.supportsAudio,
+      featureFlagsManager.supportsSpeechToText,
+    );
     let query = 'query' in searchQuery && searchQuery.query ? searchQuery.query : '';
     let queryType = query ? QueryType.SMART : this.#defaultQueryType();
 
@@ -55,6 +68,15 @@ class SearchManager {
     if (searchQuery.ocr) {
       query = searchQuery.ocr;
       queryType = QueryType.OCR;
+    }
+
+    if (searchQuery.transcript) {
+      query = searchQuery.transcript;
+      queryType = QueryType.TRANSCRIPT;
+    }
+
+    if (searchQuery.type === AssetTypeEnum.Audio && (queryType === QueryType.SMART || queryType === QueryType.OCR)) {
+      queryType = QueryType.METADATA;
     }
 
     return {
@@ -93,48 +115,56 @@ class SearchManager {
           ? MediaType.Image
           : searchQuery.type === AssetTypeEnum.Video
             ? MediaType.Video
-            : MediaType.All,
+            : searchQuery.type === AssetTypeEnum.Audio
+              ? MediaType.Audio
+              : MediaType.All,
       rating: searchQuery.rating,
     };
   }
 
   #toQuery(): MetadataSearchDto | SmartSearchDto {
-    let type: AssetTypeEnum | undefined = undefined;
-    if (this.filter.mediaType === MediaType.Image) {
-      type = AssetTypeEnum.Image;
-    } else if (this.filter.mediaType === MediaType.Video) {
-      type = AssetTypeEnum.Video;
-    }
+    const type = {
+      [MediaType.All]: undefined,
+      [MediaType.Image]: AssetTypeEnum.Image,
+      [MediaType.Video]: AssetTypeEnum.Video,
+      [MediaType.Audio]: AssetTypeEnum.Audio,
+    }[this.filter.mediaType];
 
     const query = this.filter.query || undefined;
+    const queryType = this.queryType;
 
-    return {
-      query: this.filter.queryType === 'smart' ? query : undefined,
-      queryAssetId: this.filter.queryAssetId || undefined,
-      ocr: this.filter.queryType === 'ocr' ? query : undefined,
-      originalFileName: this.filter.queryType === 'metadata' ? query : undefined,
-      description: this.filter.queryType === 'description' ? query : undefined,
-      originalPath: this.filter.queryType === 'fullPath' ? this.filter.query.trim() || undefined : undefined,
-      country: this.#emptyStringToNull(this.filter.location.country),
-      state: this.#emptyStringToNull(this.filter.location.state),
-      city: this.#emptyStringToNull(this.filter.location.city),
-      make: this.#emptyStringToNull(this.filter.camera.make),
-      model: this.#emptyStringToNull(this.filter.camera.model),
-      lensModel: this.#emptyStringToNull(this.filter.camera.lensModel),
-      takenAfter: this.filter.date.takenAfter
-        ? asLocalTimeISO(this.filter.date.takenAfter.startOf('day') as DateTime<true>)
-        : undefined,
-      takenBefore: this.filter.date.takenBefore
-        ? asLocalTimeISO(this.filter.date.takenBefore.endOf('day') as DateTime<true>)
-        : undefined,
-      visibility: this.filter.display.isArchive ? AssetVisibility.Archive : undefined,
-      isFavorite: this.filter.display.isFavorite || undefined,
-      isNotInAlbum: this.filter.display.isNotInAlbum || undefined,
-      personIds: this.filter.personIds.size > 0 ? [...this.filter.personIds] : undefined,
-      tagIds: this.filter.tagIds === null ? null : this.filter.tagIds.size > 0 ? [...this.filter.tagIds] : undefined,
-      type,
-      rating: this.filter.rating,
-    };
+    return normalizeAudioSearchQuery(
+      {
+        query: queryType === 'smart' ? query : undefined,
+        queryAssetId: queryType === 'transcript' ? undefined : this.filter.queryAssetId || undefined,
+        ocr: queryType === 'ocr' ? query : undefined,
+        transcript: queryType === 'transcript' ? query : undefined,
+        originalFileName: queryType === 'metadata' ? query : undefined,
+        description: queryType === 'description' ? query : undefined,
+        originalPath: queryType === 'fullPath' ? this.filter.query.trim() || undefined : undefined,
+        country: this.#emptyStringToNull(this.filter.location.country),
+        state: this.#emptyStringToNull(this.filter.location.state),
+        city: this.#emptyStringToNull(this.filter.location.city),
+        make: this.#emptyStringToNull(this.filter.camera.make),
+        model: this.#emptyStringToNull(this.filter.camera.model),
+        lensModel: this.#emptyStringToNull(this.filter.camera.lensModel),
+        takenAfter: this.filter.date.takenAfter
+          ? asLocalTimeISO(this.filter.date.takenAfter.startOf('day') as DateTime<true>)
+          : undefined,
+        takenBefore: this.filter.date.takenBefore
+          ? asLocalTimeISO(this.filter.date.takenBefore.endOf('day') as DateTime<true>)
+          : undefined,
+        visibility: this.filter.display.isArchive ? AssetVisibility.Archive : undefined,
+        isFavorite: this.filter.display.isFavorite || undefined,
+        isNotInAlbum: this.filter.display.isNotInAlbum || undefined,
+        personIds: this.filter.personIds.size > 0 ? [...this.filter.personIds] : undefined,
+        tagIds: this.filter.tagIds === null ? null : this.filter.tagIds.size > 0 ? [...this.filter.tagIds] : undefined,
+        type,
+        rating: this.filter.rating,
+      },
+      featureFlagsManager.supportsAudio,
+      featureFlagsManager.supportsSpeechToText,
+    );
   }
 
   #withNullAsEmptyString<T>(value: T | null) {

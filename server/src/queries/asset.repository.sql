@@ -364,7 +364,8 @@ with
     from
       "asset"
     where
-      "asset"."deletedAt" is null
+      "asset"."type" != $1
+      and "asset"."deletedAt" is null
       and "asset"."visibility" in ('archive', 'timeline')
   )
 select
@@ -387,6 +388,7 @@ with
       asset."isFavorite"
       and asset."ownerId" = $1 as "isFavorite",
       asset.type = 'IMAGE' as "isImage",
+      asset.type = 'AUDIO' as "isAudio",
       asset."deletedAt" is not null as "isTrashed",
       "asset"."livePhotoVideoId",
       extract(
@@ -432,9 +434,10 @@ with
           "stacked"."stackId"
       ) as "stacked_assets" on true
     where
-      "asset"."deletedAt" is null
+      "asset"."type" != $3
+      and "asset"."deletedAt" is null
       and "asset"."visibility" in ('archive', 'timeline')
-      and date_trunc('MONTH', "localDateTime" AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' = $3
+      and date_trunc('MONTH', "localDateTime" AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' = $4
       and not exists (
         select
         from
@@ -455,6 +458,7 @@ with
       coalesce(array_agg("visibility"), '{}') as "visibility",
       coalesce(array_agg("isFavorite"), '{}') as "isFavorite",
       coalesce(array_agg("isImage"), '{}') as "isImage",
+      coalesce(array_agg("isAudio"), '{}') as "isAudio",
       coalesce(array_agg("isTrashed"), '{}') as "isTrashed",
       coalesce(array_agg("livePhotoVideoId"), '{}') as "livePhotoVideoId",
       coalesce(array_agg("fileCreatedAt"), '{}') as "fileCreatedAt",
@@ -615,7 +619,7 @@ from
   "asset"
 where
   "asset"."id" = $1
-  and "asset"."type" = $2
+  and "asset"."type" in ($2, $3)
 
 -- AssetRepository.getForOcr
 select

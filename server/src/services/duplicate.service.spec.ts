@@ -417,6 +417,13 @@ describe(DuplicateService.name, () => {
   });
 
   describe('handleSearchDuplicates', () => {
+    it('should skip audio even if a stale visual embedding exists', async () => {
+      mocks.assetJob.getForSearchDuplicatesJob.mockResolvedValue({ ...hasEmbedding, type: AssetType.Audio });
+
+      await expect(sut.handleSearchDuplicates({ id: hasEmbedding.id })).resolves.toBe(JobStatus.Skipped);
+      expect(mocks.duplicateRepository.search).not.toHaveBeenCalled();
+    });
+
     beforeEach(() => {
       mocks.systemMetadata.get.mockResolvedValue({
         machineLearning: {

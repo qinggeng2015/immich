@@ -8,11 +8,13 @@ import 'package:immich_mobile/domain/models/timeline.model.dart';
 import 'package:immich_mobile/domain/services/timeline.service.dart';
 import 'package:immich_mobile/generated/codegen_loader.g.dart';
 import 'package:immich_mobile/presentation/widgets/asset_viewer/asset_page.widget.dart';
+import 'package:immich_mobile/presentation/widgets/asset_viewer/audio_cover.widget.dart';
 import 'package:immich_mobile/providers/asset_viewer/asset_viewer.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
 import 'package:immich_mobile/widgets/photo_view/photo_view.dart';
 
 import '../../../fixtures/asset.stub.dart';
+import '../../../unit/factories/remote_asset_factory.dart';
 import '../../../unit/presentation/presentation_context.dart';
 
 class _SingleAssetTimelineService extends TimelineService {
@@ -41,6 +43,26 @@ void main() {
 
   tearDown(() async {
     await context.dispose();
+  });
+
+  testWidgets('audio with zero Android media dimensions has a finite viewer layout', (tester) async {
+    final audio = RemoteAssetFactory.create(type: .audio).copyWith(width: 0, height: 0, durationMs: 65000);
+    final timeline = _SingleAssetTimelineService(audio);
+    addTearDown(timeline.dispose);
+    await tester.pumpTestWidget(
+      context,
+      const Material(child: AssetPage(index: 0, heroOffset: 0)),
+      overrides: [timelineServiceProvider.overrideWithValue(timeline)],
+      expectSettle: false,
+    );
+    await tester.pump(const Duration(milliseconds: 600));
+
+    expect(find.byType(AudioCover), findsOneWidget);
+    final size = tester.getSize(find.byType(AudioCover));
+    expect(size.width.isFinite && size.height.isFinite, isTrue);
+    expect(size.width, greaterThan(0));
+    expect(size.height, greaterThan(0));
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('keeps controls hidden after zooming back out', (tester) async {

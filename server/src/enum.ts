@@ -849,7 +849,24 @@ export enum BootstrapEventPriority {
   PluginLoad = 200,
 }
 
+export enum AudioAnalysisStatus {
+  Unprocessed = 'unprocessed',
+  Pending = 'pending',
+  Processing = 'processing',
+  Ready = 'ready',
+  Failed = 'failed',
+  Disabled = 'disabled',
+}
+
+export const AudioAnalysisStatusSchema = z
+  .enum(AudioAnalysisStatus)
+  .describe('Audio analysis status')
+  .meta({ id: 'AudioAnalysisStatus' });
+
 export enum QueueName {
+  AudioWaveform = 'audioWaveform',
+  SpeechToText = 'speechToText',
+  AudioSummary = 'audioSummary',
   ThumbnailGeneration = 'thumbnailGeneration',
   MetadataExtraction = 'metadataExtraction',
   VideoConversion = 'videoConversion',
@@ -884,6 +901,12 @@ export enum QueueJobStatus {
 export const QueueJobStatusSchema = z.enum(QueueJobStatus).describe('Queue job status').meta({ id: 'QueueJobStatus' });
 
 export enum JobName {
+  AssetGenerateWaveformQueueAll = 'AssetGenerateWaveformQueueAll',
+  AssetGenerateWaveform = 'AssetGenerateWaveform',
+  AssetTranscribeQueueAll = 'AssetTranscribeQueueAll',
+  AssetTranscribe = 'AssetTranscribe',
+  AssetSummarizeQueueAll = 'AssetSummarizeQueueAll',
+  AssetSummarize = 'AssetSummarize',
   AssetDelete = 'AssetDelete',
   AssetDeleteCheck = 'AssetDeleteCheck',
   AssetDetectFacesQueueAll = 'AssetDetectFacesQueueAll',

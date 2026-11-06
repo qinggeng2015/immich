@@ -51,6 +51,7 @@ env:
 
 jobs:
   pre-job:
+    if: ${{ github.repository == 'immich-app/immich' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -85,7 +86,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    if: ${{ github.actor != 'dependabot[bot]' && fromJSON(needs.pre-job.outputs.should_run).mobile == true }}
+    if: ${{ github.repository == 'immich-app/immich' && (github.actor != 'dependabot[bot]' && fromJSON(needs.pre-job.outputs.should_run).mobile == true) }}
     runs-on: mich
 
     steps:
@@ -226,7 +227,7 @@ jobs:
     permissions:
       contents: read
     # Run on main branch or workflow_dispatch, or on PRs/other branches (build only, no upload)
-    if: ${{ !github.event.pull_request.head.repo.fork && fromJSON(needs.pre-job.outputs.should_run).mobile == true }}
+    if: ${{ github.repository == 'immich-app/immich' && (!github.event.pull_request.head.repo.fork && fromJSON(needs.pre-job.outputs.should_run).mobile == true) }}
     runs-on: xcode-27
 
     steps:

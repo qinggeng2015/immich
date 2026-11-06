@@ -1,0 +1,89 @@
+name: Fork Containers
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Full commit SHA of the calling workflow
+        required: true
+        type: string
+      tag:
+        description: Fork release tag beginning with audio-
+        required: true
+        type: string
+    outputs:
+      server-image:
+        description: Published multi-platform server image
+        value: ${{ jobs.validate.outputs.server-image }}
+      machine-learning-image:
+        description: Published multi-platform CPU machine-learning image
+        value: ${{ jobs.validate.outputs.machine-learning-image }}
+
+permissions: {}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.validate.outputs.tag }}
+      server-image: ${{ steps.validate.outputs.server-image }}
+      machine-learning-image: ${{ steps.validate.outputs.machine-learning-image }}
+    steps:
+      - name: Validate release identity
+        id: validate
+        env:
+          RELEASE_REF: ${{ inputs.ref }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          if [[ ! "$RELEASE_REF" =~ ^[0-9a-f]{40}$ || "$RELEASE_REF" != "$GITHUB_SHA" ]]; then
+            echo '::error::The release ref must be the full commit SHA of this workflow run'
+            exit 1
+          fi
+          if [[ ! "$RELEASE_TAG" =~ ^audio-[a-z0-9][a-z0-9_.-]{0,121}$ ]]; then
+            echo '::error::The release tag must be a valid lowercase audio-* container tag'
+            exit 1
+          fi
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "server-image=ghcr.io/$owner/immich-server:$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "machine-learning-image=ghcr.io/$owner/immich-machine-learning:$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+  server:
+    needs: validate
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+    uses: immich-app/devtools/.github/workflows/multi-runner-build.yml@4d420cf8e5ea499f99b2c2849ff9a219d5f7b178
+    with:
+      image: immich-server
+      context: .
+      dockerfile: server/Dockerfile
+      platforms: linux/amd64,linux/arm64
+      runner-mapping: '{"linux/amd64":"ubuntu-latest","linux/arm64":"ubuntu-24.04-arm"}'
+      tags: type=raw,value=${{ needs.validate.outputs.tag }}
+      build-args: |
+        DEVICE=cpu
+        BUILD_IMAGE=${{ needs.validate.outputs.server-image }}
+        BUILD_REPOSITORY=${{ github.repository }}
+        BUILD_SOURCE_REF=${{ needs.validate.outputs.tag }}
+
+  machine-learning:
+    needs: validate
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+    uses: immich-app/devtools/.github/workflows/multi-runner-build.yml@4d420cf8e5ea499f99b2c2849ff9a219d5f7b178
+    with:
+      image: immich-machine-learning
+      context: machine-learning
+      dockerfile: machine-learning/Dockerfile
+      platforms: linux/amd64,linux/arm64
+      runner-mapping: '{"linux/amd64":"ubuntu-latest","linux/arm64":"ubuntu-24.04-arm"}'
+      tags: type=raw,value=${{ needs.validate.outputs.tag }}
+      build-args: |
+        DEVICE=cpu
+        BUILD_IMAGE=${{ needs.validate.outputs.machine-learning-image }}
+        BUILD_REPOSITORY=${{ github.repository }}
+        BUILD_SOURCE_REF=${{ needs.validate.outputs.tag }}

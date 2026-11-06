@@ -5,6 +5,7 @@ import { AppController } from 'src/controllers/app.controller.js';
 import { AssetFilesController } from 'src/controllers/asset-file.controller.js';
 import { AssetMediaController } from 'src/controllers/asset-media.controller.js';
 import { AssetController } from 'src/controllers/asset.controller.js';
+import { AudioAnalysisController } from 'src/controllers/audio-analysis.controller.js';
 import { AuthAdminController } from 'src/controllers/auth-admin.controller.js';
 import { AuthController } from 'src/controllers/auth.controller.js';
 import { ClusterGroupController } from 'src/controllers/cluster-group.controller.js';
@@ -54,6 +55,7 @@ export const controllers = [
   AssetController,
   AssetFilesController,
   AssetMediaController,
+  AudioAnalysisController,
   AuthController,
   AuthAdminController,
   ClusterGroupController,

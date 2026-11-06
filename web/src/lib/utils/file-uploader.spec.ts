@@ -55,6 +55,26 @@ describe('fileUploader error handling', () => {
     });
   }
 
+  it('uploads audio accepted by the server', async () => {
+    const audio = new File(['audio'], 'recording.MP3', { type: 'audio/mpeg' });
+    vi.spyOn(uploadManager, 'getExtensions').mockReturnValue(['.jpg', '.mp3']);
+    const upload = vi.spyOn(utils, 'uploadRequest').mockResolvedValue({ status: 201, data: mockUploadResponse });
+
+    expect(await fileUploadHandler({ files: [audio] })).toEqual(['mock-id']);
+    expect(upload).toHaveBeenCalledOnce();
+    expect(get(uploadAssetsStore)[0]).toMatchObject({ state: UploadState.DONE, assetId: 'mock-id' });
+  });
+
+  it('skips unsupported audio while continuing to upload images', async () => {
+    const audio = new File(['audio'], 'recording.mp3', { type: 'audio/mpeg' });
+    const upload = vi.spyOn(utils, 'uploadRequest').mockResolvedValue({ status: 201, data: mockUploadResponse });
+
+    expect(await fileUploadHandler({ files: [audio, mockFile] })).toEqual(['mock-id']);
+    expect(upload).toHaveBeenCalledOnce();
+    expect(get(uploadAssetsStore)).toHaveLength(1);
+    expect(get(uploadAssetsStore)[0].file).toBe(mockFile);
+  });
+
   it('should suppress errors on logout', async () => {
     authManager.setUser(mockUserObject);
     authManager.setPreferences(factory.preferences());

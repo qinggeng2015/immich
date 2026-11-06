@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:immich_mobile/domain/services/local_sync.service.dart';
 import 'package:immich_mobile/domain/utils/migrate_cloud_ids.dart' as m;
 import 'package:immich_mobile/domain/utils/sync_linked_album.dart';
 import 'package:immich_mobile/providers/infrastructure/sync.provider.dart';
@@ -31,9 +32,13 @@ class BackgroundSyncManager {
   bool _syncQueued = false;
   Cancelable<void>? _syncWebsocketTask;
   Cancelable<void>? _cloudIdSyncTask;
-  Cancelable<void>? _deviceAlbumSyncTask;
+  Cancelable<LocalSyncResult?>? _deviceAlbumSyncTask;
+  Future<LocalSyncResult?>? _queuedLocalFullSync;
+  int _localSyncGeneration = 0;
+  int _cancelGeneration = 0;
   Cancelable<void>? _linkedAlbumSyncTask;
   Cancelable<void>? _hashTask;
+  Future<void>? _queuedHashTask;
 
   BackgroundSyncManager({
     this.onRemoteSyncStart,
@@ -59,6 +64,10 @@ class BackgroundSyncManager {
   List<Cancelable?> get _allTasks => [_syncWebsocketTask, _cloudIdSyncTask, ..._resumeSyncTasks];
 
   Future<void> cancel() async {
+    _cancelGeneration++;
+    _localSyncGeneration++;
+    _queuedLocalFullSync = null;
+    _queuedHashTask = null;
     _syncQueued = false;
     final tasks = _allTasks;
     _syncTask = null;
@@ -71,6 +80,9 @@ class BackgroundSyncManager {
   }
 
   Future<void> cancelResumeSyncs() async {
+    _localSyncGeneration++;
+    _queuedLocalFullSync = null;
+    _queuedHashTask = null;
     _syncQueued = false;
     final tasks = _resumeSyncTasks;
     _syncTask = null;
@@ -98,9 +110,49 @@ class BackgroundSyncManager {
   }
 
   // No need to cancel the task, as it can also be run when the user logs out
-  Future<void> syncLocal({bool full = false}) {
-    if (_deviceAlbumSyncTask != null) {
-      return _deviceAlbumSyncTask!.future.catchError((_) {}, test: (error) => error is CanceledError);
+  Future<void> syncLocal({bool full = false}) async {
+    try {
+      await _syncLocal(full: full);
+    } catch (error) {
+      if (error is! CanceledError) {
+        onLocalSyncError?.call(error.toString());
+      }
+    }
+  }
+
+  Future<bool> awaitFullLocalSync({required bool Function() shouldContinue}) async {
+    final cancellation = _cancelGeneration;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (cancellation != _cancelGeneration || !shouldContinue()) {
+        return false;
+      }
+      final generation = _localSyncGeneration;
+      LocalSyncResult? result;
+      try {
+        result = await _syncLocal(full: true);
+      } on CanceledError {
+        result = LocalSyncResult.cancelled;
+      }
+      if (cancellation != _cancelGeneration || !shouldContinue()) {
+        return false;
+      }
+      if (result == null || result == LocalSyncResult.failed) {
+        throw StateError('Local directory synchronization failed');
+      }
+      if (generation == _localSyncGeneration && result == LocalSyncResult.completed) {
+        return true;
+      }
+    }
+    throw StateError('Local directory synchronization was repeatedly interrupted');
+  }
+
+  Future<LocalSyncResult?> _syncLocal({bool full = false}) {
+    final activeTask = _deviceAlbumSyncTask;
+    if (activeTask != null) {
+      if (full) {
+        return _queuedLocalFullSync ??= _runQueuedFullSync(activeTask, _localSyncGeneration);
+      }
+      return activeTask.future;
     }
 
     onLocalSyncStart?.call();
@@ -117,23 +169,40 @@ class BackgroundSyncManager {
             debugLabel: 'local-sync-full-false',
           );
 
-    return task
-        .whenComplete(() {
-          if (identical(_deviceAlbumSyncTask, task)) {
-            _deviceAlbumSyncTask = null;
-          }
-          onLocalSyncComplete?.call();
-        })
-        .catchError((error) {
-          if (error is! CanceledError) {
-            onLocalSyncError?.call(error.toString());
-          }
-        });
+    return task.whenComplete(() {
+      if (identical(_deviceAlbumSyncTask, task)) {
+        _deviceAlbumSyncTask = null;
+      }
+      onLocalSyncComplete?.call();
+    });
   }
 
-  Future<void> hashAssets() {
-    if (_hashTask != null) {
-      return _hashTask!.future.catchError((_) {}, test: (error) => error is CanceledError);
+  Future<LocalSyncResult?> _runQueuedFullSync(Cancelable<LocalSyncResult?> activeTask, int generation) async {
+    try {
+      await activeTask.future;
+    } on CanceledError {
+      return LocalSyncResult.cancelled;
+    } finally {
+      if (generation == _localSyncGeneration) {
+        _queuedLocalFullSync = null;
+      }
+    }
+    if (generation != _localSyncGeneration) {
+      return LocalSyncResult.cancelled;
+    }
+    if (identical(_deviceAlbumSyncTask, activeTask)) {
+      _deviceAlbumSyncTask = null;
+    }
+    return _syncLocal(full: true);
+  }
+
+  Future<void> hashAssets({bool enqueue = false}) {
+    final activeTask = _hashTask;
+    if (activeTask != null) {
+      if (enqueue) {
+        return _queuedHashTask ??= _runQueuedHash(activeTask, _localSyncGeneration);
+      }
+      return activeTask.future.catchError((_) {}, test: (error) => error is CanceledError);
     }
 
     onHashingStart?.call();
@@ -155,6 +224,32 @@ class BackgroundSyncManager {
             onHashingError?.call(error.toString());
           }
         });
+  }
+
+  Future<void> _runQueuedHash(Cancelable<void> activeTask, int generation) async {
+    try {
+      await activeTask.future;
+    } on CanceledError {
+      return;
+    } finally {
+      if (generation == _localSyncGeneration) {
+        _queuedHashTask = null;
+      }
+    }
+    if (generation != _localSyncGeneration) {
+      return;
+    }
+    if (identical(_hashTask, activeTask)) {
+      _hashTask = null;
+    }
+    await hashAssets();
+  }
+
+  Future<bool> prepareBackup({bool syncServer = true}) async {
+    final generation = _localSyncGeneration;
+    var synced = false;
+    await Future.wait([hashAssets(enqueue: true), if (syncServer) syncRemote().then((success) => synced = success)]);
+    return synced && generation == _localSyncGeneration;
   }
 
   Future<bool> syncRemote({bool enqueue = false}) {

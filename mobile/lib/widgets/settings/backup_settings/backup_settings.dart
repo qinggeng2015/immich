@@ -9,6 +9,7 @@ import 'package:immich_mobile/domain/services/sync_linked_album.service.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/extensions/platform_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/presentation/widgets/backup/audio_backup_folder.widget.dart';
 import 'package:immich_mobile/providers/background_sync.provider.dart';
 import 'package:immich_mobile/providers/backup/backup_album.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/platform.provider.dart';
@@ -26,6 +27,8 @@ class BackupSettings extends StatelessWidget {
         SettingGroupTitle(title: context.t.network_requirements, icon: Icons.cell_tower),
         const _UseCellularForVideosButton(),
         const _UseCellularForPhotosButton(),
+        const _UseCellularForAudioButton(),
+        if (CurrentPlatform.isIOS) const AudioBackupFolder(),
         if (CurrentPlatform.isAndroid) ...[
           const Divider(),
           SettingGroupTitle(title: context.t.background_options, icon: Icons.charging_station_rounded),
@@ -205,6 +208,20 @@ class _UseCellularForPhotosButton extends StatelessWidget {
       selector: (c) => c.backup.useCellularForPhotos,
       title: context.t.photos,
       subtitle: context.t.network_requirement_photos_upload,
+    );
+  }
+}
+
+class _UseCellularForAudioButton extends StatelessWidget {
+  const _UseCellularForAudioButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return _BackupSwitchTile(
+      metadataKey: SettingsKey.backupUseCellularForAudio,
+      selector: (c) => c.backup.useCellularForAudio,
+      title: context.t.audio,
+      subtitle: context.t.network_requirement_audio_upload,
     );
   }
 }

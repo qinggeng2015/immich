@@ -69,6 +69,15 @@ describe('config visibility', () => {
     expect(config.notifications).toEqual({ smtp: { enabled: defaults.notifications.smtp.enabled } });
   });
 
+  it('should expose optional speech settings without exposing model configuration', () => {
+    const config = mapUserConfig(defaults);
+    expect(config.machineLearning?.speechToText).toEqual({ enabled: true, autoTranscribe: true });
+    expect(mapPublicConfig(defaults)).not.toHaveProperty('machineLearning');
+    const legacy = structuredClone(config);
+    delete legacy.machineLearning?.speechToText;
+    expect(UserConfigDto.schema.safeParse(legacy).success).toBe(true);
+  });
+
   it('should keep the visibility metadata out of the schemas', () => {
     for (const schema of [AdminConfigDto.schema, UserConfigDto.schema, PublicConfigDto.schema]) {
       const json = JSON.stringify(z.toJSONSchema(schema, { io: 'input', unrepresentable: 'any' }));

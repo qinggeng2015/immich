@@ -1,4 +1,4 @@
-import { AssetFileType, AssetVisibility, ImmichWorker, JobName, JobStatus } from 'src/enum.js';
+import { AssetFileType, AssetType, AssetVisibility, ImmichWorker, JobName, JobStatus } from 'src/enum.js';
 import { OcrService } from 'src/services/ocr.service.js';
 import { AssetFactory } from 'test/factories/asset.factory.js';
 import { systemConfigStub } from 'test/fixtures/system-config.stub.js';
@@ -13,6 +13,7 @@ describe(OcrService.name, () => {
 
     mocks.config.getWorker.mockReturnValue(ImmichWorker.Microservices);
     mocks.assetJob.getForOcr.mockResolvedValue({
+      type: AssetType.Image,
       ownerId: 'user-id',
       visibility: AssetVisibility.Timeline,
       previewFile: '/uploads/user-id/thumbs/path.jpg',
@@ -63,6 +64,18 @@ describe(OcrService.name, () => {
   });
 
   describe('handleOcr', () => {
+    it('should skip audio without calling the OCR model', async () => {
+      mocks.assetJob.getForOcr.mockResolvedValue({
+        type: AssetType.Audio,
+        ownerId: 'user-id',
+        visibility: AssetVisibility.Timeline,
+        previewFile: null,
+      });
+
+      await expect(sut.handleOcr({ id: 'audio-id' })).resolves.toBe(JobStatus.Skipped);
+      expect(mocks.machineLearning.ocr).not.toHaveBeenCalled();
+    });
+
     it('should do nothing if machine learning is disabled', async () => {
       mocks.systemMetadata.get.mockResolvedValue(systemConfigStub.machineLearningDisabled);
 
@@ -76,6 +89,7 @@ describe(OcrService.name, () => {
     it('should skip assets without a resize path', async () => {
       const asset = AssetFactory.create();
       mocks.assetJob.getForOcr.mockResolvedValue({
+        type: AssetType.Image,
         ownerId: 'userId',
         visibility: AssetVisibility.Timeline,
         previewFile: null,
@@ -177,6 +191,7 @@ describe(OcrService.name, () => {
     it('should skip invisible assets', async () => {
       const asset = AssetFactory.from().file({ type: AssetFileType.Preview }).build();
       mocks.assetJob.getForOcr.mockResolvedValue({
+        type: AssetType.Image,
         ownerId: 'userId',
         visibility: AssetVisibility.Hidden,
         previewFile: asset.files[0].path,

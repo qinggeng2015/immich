@@ -21,7 +21,6 @@ import {
 } from 'src/dtos/library.dto.js';
 import {
   AssetStatus,
-  AssetType,
   ChecksumAlgorithm,
   CronJob,
   DatabaseLock,
@@ -418,7 +417,7 @@ export class LibraryService extends BaseService {
       fileCreatedAt: stat.mtime,
       fileModifiedAt: stat.mtime,
       localDateTime: stat.mtime,
-      type: mimeTypes.isVideo(assetPath) ? AssetType.Video : AssetType.Image,
+      type: mimeTypes.assetType(assetPath),
       originalFileName: parse(assetPath).base,
       isExternal: true,
       livePhotoVideoId: null,

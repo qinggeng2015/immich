@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import type { DeepPartial } from 'src/types.js';
-import { SystemConfig, defaults } from 'src/dtos/config.dto.js';
+import { AdminConfigDto, SystemConfig, defaults, mapAdminConfig } from 'src/dtos/config.dto.js';
 import {
   AudioCodec,
   CQMode,
@@ -30,6 +30,7 @@ const partialConfig = {
 
 const updatedConfig = Object.freeze<SystemConfig>({
   job: {
+    ...defaults.job,
     [QueueName.BackgroundTask]: { concurrency: 5 },
     [QueueName.SmartSearch]: { concurrency: 2 },
     [QueueName.MetadataExtraction]: { concurrency: 5 },
@@ -108,6 +109,7 @@ const updatedConfig = Object.freeze<SystemConfig>({
     },
   },
   machineLearning: {
+    ...defaults.machineLearning,
     enabled: true,
     urls: ['http://immich-machine-learning:3003'],
     availabilityChecks: {
@@ -276,7 +278,7 @@ describe(SystemConfigService.name, () => {
     it('should return the default config', () => {
       mocks.systemMetadata.get.mockResolvedValue(partialConfig);
 
-      expect(sut.getAdminConfigDefaults()).toEqual(defaults);
+      expect(sut.getAdminConfigDefaults()).toEqual(mapAdminConfig(defaults));
       expect(mocks.systemMetadata.get).not.toHaveBeenCalled();
     });
   });
@@ -285,7 +287,7 @@ describe(SystemConfigService.name, () => {
     it('should return the default config', async () => {
       mocks.systemMetadata.get.mockResolvedValue({});
 
-      await expect(sut.getAdminConfig()).resolves.toEqual(defaults);
+      await expect(sut.getAdminConfig()).resolves.toEqual(mapAdminConfig(defaults));
     });
 
     it('should merge the overrides', async () => {
@@ -296,14 +298,14 @@ describe(SystemConfigService.name, () => {
         user: { deleteDelay: 15 },
       });
 
-      await expect(sut.getAdminConfig()).resolves.toEqual(updatedConfig);
+      await expect(sut.getAdminConfig()).resolves.toEqual(mapAdminConfig(updatedConfig));
     });
 
     it('should load the config from a json file', async () => {
       mocks.config.getEnv.mockReturnValue(mockEnvData({ configFile: 'immich-config.json' }));
       mocks.systemMetadata.readFile.mockResolvedValue(JSON.stringify(partialConfig));
 
-      await expect(sut.getAdminConfig()).resolves.toEqual(updatedConfig);
+      await expect(sut.getAdminConfig()).resolves.toEqual(mapAdminConfig(updatedConfig));
 
       expect(mocks.systemMetadata.readFile).toHaveBeenCalledWith('immich-config.json');
     });
@@ -387,7 +389,7 @@ describe(SystemConfigService.name, () => {
       `;
       mocks.systemMetadata.readFile.mockResolvedValue(partialConfig);
 
-      await expect(sut.getAdminConfig()).resolves.toEqual(updatedConfig);
+      await expect(sut.getAdminConfig()).resolves.toEqual(mapAdminConfig(updatedConfig));
 
       expect(mocks.systemMetadata.readFile).toHaveBeenCalledWith('immich-config.yaml');
     });
@@ -396,7 +398,7 @@ describe(SystemConfigService.name, () => {
       mocks.config.getEnv.mockReturnValue(mockEnvData({ configFile: 'immich-config.json' }));
       mocks.systemMetadata.readFile.mockResolvedValue(JSON.stringify({}));
 
-      await expect(sut.getAdminConfig()).resolves.toEqual(defaults);
+      await expect(sut.getAdminConfig()).resolves.toEqual(mapAdminConfig(defaults));
 
       expect(mocks.systemMetadata.readFile).toHaveBeenCalledWith('immich-config.json');
     });
@@ -487,9 +489,140 @@ describe(SystemConfigService.name, () => {
   });
 
   describe('updateConfig', () => {
+    it.each([undefined, ''])(
+      'retains a summary API key when input is %s and redacts admin responses',
+      async (apiKey) => {
+        mocks.systemMetadata.get.mockResolvedValue({ machineLearning: { audioSummary: { apiKey: 'stored-secret' } } });
+        const dto = structuredClone(defaults);
+        dto.machineLearning.audioSummary!.apiKey = apiKey;
+        const response = await sut.updateAdminConfig(dto);
+        expect(mocks.systemMetadata.set).toHaveBeenCalledWith(expect.anything(), {
+          machineLearning: { audioSummary: { apiKey: 'stored-secret' } },
+        });
+        expect(response.machineLearning.audioSummary).toMatchObject({
+          apiKey: '',
+          apiKeyConfigured: true,
+          clearApiKey: false,
+        });
+        expect(JSON.stringify(response)).not.toContain('stored-secret');
+        expect(await sut.getUserConfig()).toMatchObject({
+          machineLearning: { audioSummary: { enabled: false, autoSummarize: true } },
+        });
+        expect(JSON.stringify(await sut.getUserConfig())).not.toContain('stored-secret');
+        expect(await sut.getPublicConfig()).not.toHaveProperty('machineLearning');
+      },
+    );
+
+    it('clears the summary API key only through the explicit clear flag', async () => {
+      mocks.systemMetadata.get.mockResolvedValue({ machineLearning: { audioSummary: { apiKey: 'stored-secret' } } });
+      const dto = structuredClone(defaults);
+      dto.machineLearning.audioSummary!.clearApiKey = true;
+      await sut.updateAdminConfig(dto);
+      expect(mocks.systemMetadata.set).toHaveBeenCalledWith(expect.anything(), {});
+    });
+
+    it('retains summary settings omitted by an older admin client', async () => {
+      mocks.systemMetadata.get.mockResolvedValue({
+        machineLearning: { audioSummary: { apiKey: 'stored-secret', modelName: 'custom-model' } },
+        job: { audioSummary: { concurrency: 2 } },
+      });
+      const dto = structuredClone(defaults);
+      delete dto.machineLearning.audioSummary;
+      delete dto.job.audioSummary;
+      await sut.updateAdminConfig(dto);
+      expect(mocks.systemMetadata.set).toHaveBeenCalledWith(expect.anything(), {
+        machineLearning: { audioSummary: { apiKey: 'stored-secret', modelName: 'custom-model' } },
+        job: { audioSummary: { concurrency: 2 } },
+      });
+    });
+
+    it('rejects enabling summaries without configured credentials', async () => {
+      const dto = structuredClone(defaults);
+      dto.machineLearning.audioSummary!.enabled = true;
+      await expect(sut.updateAdminConfig(dto)).rejects.toThrow(
+        'Audio summary requires a valid API base URL, API key, and model name',
+      );
+      expect(mocks.systemMetadata.set).not.toHaveBeenCalled();
+    });
+    it('should retain audio analysis settings omitted by an older admin client', async () => {
+      const audioSettings = {
+        job: { audioWaveform: { concurrency: 3 }, speechToText: { concurrency: 2 } },
+        machineLearning: {
+          speechToText: { enabled: false, autoTranscribe: false, modelName: 'SenseVoiceSmall', language: 'zh' },
+        },
+      } satisfies DeepPartial<SystemConfig>;
+      mocks.systemMetadata.get.mockResolvedValue(audioSettings);
+      const dto = structuredClone(defaults);
+      delete dto.job.audioWaveform;
+      delete dto.job.speechToText;
+      delete dto.machineLearning.speechToText;
+
+      await sut.updateAdminConfig(dto);
+
+      expect(mocks.event.emit).toHaveBeenCalledWith(
+        'ConfigValidate',
+        expect.objectContaining({
+          newConfig: expect.objectContaining({
+            job: expect.objectContaining(audioSettings.job),
+            machineLearning: expect.objectContaining(audioSettings.machineLearning),
+          }),
+        }),
+      );
+      expect(mocks.systemMetadata.set).toHaveBeenCalledWith(expect.anything(), {
+        job: audioSettings.job,
+        machineLearning: { speechToText: { enabled: false, autoTranscribe: false, language: 'zh' } },
+      });
+      expect(dto.job).not.toHaveProperty('audioWaveform');
+      expect(dto.machineLearning).not.toHaveProperty('speechToText');
+    });
+
+    it('should retain an omitted automatic transcription preference while applying explicit audio changes', async () => {
+      mocks.systemMetadata.get.mockResolvedValue({
+        machineLearning: { speechToText: { autoTranscribe: false } },
+      });
+      const dto = AdminConfigDto.schema.parse({
+        ...defaults,
+        job: { ...defaults.job, speechToText: { concurrency: 4 } },
+        machineLearning: {
+          ...defaults.machineLearning,
+          speechToText: { enabled: false, modelName: 'SenseVoiceSmall', language: 'en' },
+        },
+      });
+
+      await sut.updateAdminConfig(dto);
+
+      expect(mocks.systemMetadata.set).toHaveBeenCalledWith(expect.anything(), {
+        job: { speechToText: { concurrency: 4 } },
+        machineLearning: {
+          speechToText: { enabled: false, autoTranscribe: false, language: 'en' },
+        },
+      });
+    });
+
+    it('should allow an explicit change to the automatic transcription preference', async () => {
+      mocks.systemMetadata.get.mockResolvedValue({
+        machineLearning: { speechToText: { autoTranscribe: false } },
+      });
+      const dto = AdminConfigDto.schema.parse(defaults);
+
+      await sut.updateAdminConfig(dto);
+
+      expect(mocks.event.emit).toHaveBeenCalledWith(
+        'ConfigValidate',
+        expect.objectContaining({
+          newConfig: expect.objectContaining({
+            machineLearning: expect.objectContaining({
+              speechToText: expect.objectContaining({ autoTranscribe: true }),
+            }),
+          }),
+        }),
+      );
+      expect(mocks.systemMetadata.set).toHaveBeenCalledWith(expect.anything(), {});
+    });
+
     it('should update the config and emit an event', async () => {
       mocks.systemMetadata.get.mockResolvedValue(partialConfig);
-      await expect(sut.updateAdminConfig(updatedConfig)).resolves.toEqual(updatedConfig);
+      await expect(sut.updateAdminConfig(updatedConfig)).resolves.toEqual(mapAdminConfig(updatedConfig));
       expect(mocks.event.emit).toHaveBeenCalledWith(
         'ConfigUpdate',
         expect.objectContaining({ oldConfig: expect.any(Object), newConfig: updatedConfig }),

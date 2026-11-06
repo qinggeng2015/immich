@@ -20,6 +20,7 @@ class NativeSyncApiImpl30(context: Context) : NativeSyncApiImplBase(context), Na
   companion object {
     const val SHARED_PREF_NAME = "Immich::MediaManager"
     const val SHARED_PREF_MEDIA_STORE_VERSION_KEY = "MediaStore::getVersion"
+    const val SHARED_PREF_AUDIO_SYNC_KEY = "MediaStore::audioSyncVersion"
     const val SHARED_PREF_MEDIA_STORE_GEN_KEY = "MediaStore::getGeneration"
   }
 
@@ -42,7 +43,9 @@ class NativeSyncApiImpl30(context: Context) : NativeSyncApiImplBase(context), Na
   }
 
   private fun shouldFullSync(): Boolean =
-    MediaStore.getVersion(ctx) != prefs.getString(SHARED_PREF_MEDIA_STORE_VERSION_KEY, null)
+    directoryStore.hasDirectories ||
+      MediaStore.getVersion(ctx) != prefs.getString(SHARED_PREF_MEDIA_STORE_VERSION_KEY, null) ||
+      prefs.getInt(SHARED_PREF_AUDIO_SYNC_KEY, 0) != AudioSyncPolicy.VERSION
 
   override fun checkpointSync() {
     val genMap = MediaStore.getExternalVolumeNames(ctx)
@@ -50,6 +53,7 @@ class NativeSyncApiImpl30(context: Context) : NativeSyncApiImplBase(context), Na
 
     prefs.edit().apply {
       putString(SHARED_PREF_MEDIA_STORE_VERSION_KEY, MediaStore.getVersion(ctx))
+      putInt(SHARED_PREF_AUDIO_SYNC_KEY, AudioSyncPolicy.VERSION)
       putString(SHARED_PREF_MEDIA_STORE_GEN_KEY, Json.encodeToString(genMap))
       apply()
     }
@@ -78,7 +82,7 @@ class NativeSyncApiImpl30(context: Context) : NativeSyncApiImplBase(context), Na
       hasChanges = true
 
       val selection =
-        "$MEDIA_SELECTION AND (${MediaStore.MediaColumns.GENERATION_MODIFIED} > ? OR ${MediaStore.MediaColumns.GENERATION_ADDED} > ?)"
+        "${MEDIA_SELECTION} AND (${MediaStore.MediaColumns.GENERATION_MODIFIED} > ? OR ${MediaStore.MediaColumns.GENERATION_ADDED} > ?)"
       val selectionArgs = arrayOf(
         *MEDIA_SELECTION_ARGS,
         storedGen.toString(),

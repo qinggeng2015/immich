@@ -176,7 +176,7 @@ export class MetadataService extends BaseService {
     asset: { id: string; type: AssetType; ownerId: string; libraryId: string | null },
     exifInfo: Insertable<AssetExifTable>,
   ): Promise<void> {
-    if (!exifInfo.livePhotoCID) {
+    if (!exifInfo.livePhotoCID || asset.type === AssetType.Audio) {
       return;
     }
 
@@ -364,8 +364,8 @@ export class MetadataService extends BaseService {
         : undefined;
 
     const isSidewards = exifTags.Orientation && this.isOrientationSidewards(exifTags.Orientation);
-    const assetWidth = validate(isSidewards ? height : width);
-    const assetHeight = validate(isSidewards ? width : height);
+    const assetWidth = asset.type === AssetType.Audio ? 512 : validate(isSidewards ? height : width);
+    const assetHeight = asset.type === AssetType.Audio ? 512 : validate(isSidewards ? width : height);
 
     const tasks = new Tasks();
 
@@ -398,7 +398,7 @@ export class MetadataService extends BaseService {
       tasks.push(() => this.applyMotionPhotos(asset, exifTags, dates, stats));
     }
 
-    if (isFaceImportEnabled(metadata) && this.hasTaggedFaces(exifTags)) {
+    if (asset.type !== AssetType.Audio && isFaceImportEnabled(metadata) && this.hasTaggedFaces(exifTags)) {
       tasks.push(() => this.applyTaggedFaces(asset, exifTags));
     }
 
@@ -571,12 +571,15 @@ export class MetadataService extends BaseService {
 
   private async getExifTags(asset: { originalPath: string; files: AssetFile[]; type: AssetType }) {
     const { sidecarFile } = getAssetFiles(asset.files);
-    const shouldProbe = asset.type === AssetType.Video || asset.originalPath.toLowerCase().endsWith('.gif');
+    const shouldProbe =
+      asset.type === AssetType.Video ||
+      asset.type === AssetType.Audio ||
+      asset.originalPath.toLowerCase().endsWith('.gif');
 
     const [mediaTags, sidecarTags, videoResult] = await Promise.all([
       this.metadataRepository.readTags(asset.originalPath),
       sidecarFile ? this.metadataRepository.readTags(sidecarFile.path) : null,
-      shouldProbe ? this.getVideoTags(asset.originalPath) : null,
+      shouldProbe ? this.getVideoTags(asset.originalPath, asset.type) : null,
     ]);
 
     // prefer dates from sidecar tags
@@ -1118,9 +1121,9 @@ export class MetadataService extends BaseService {
     return Number.isFinite(seconds) ? Math.round(Duration.fromObject({ seconds }).toMillis()) : null;
   }
 
-  private async getVideoTags(originalPath: string) {
+  private async getVideoTags(originalPath: string, type: AssetType) {
     const { videoStreams, audioStreams, format } = await this.mediaRepository.probe(originalPath);
-    const video = videoStreams[0];
+    const video = type === AssetType.Audio ? undefined : videoStreams[0];
     const audio = audioStreams[0];
     const packets = video?.timeBase ? await this.mediaRepository.probePackets(originalPath, video.index) : null;
 
@@ -1154,8 +1157,12 @@ export class MetadataService extends BaseService {
       }
     }
 
-    if (format.duration) {
-      tags.Duration = format.duration;
+    const duration =
+      type === AssetType.Audio && audio && (!Number.isFinite(format.duration) || format.duration <= 0)
+        ? await this.mediaRepository.probeAudioDuration(originalPath, audio.index)
+        : format.duration;
+    if (duration) {
+      tags.Duration = duration;
     }
 
     return { tags, audio, video, packets, format };

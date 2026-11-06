@@ -41,7 +41,7 @@ class DownloadTaskTile extends StatelessWidget {
         shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(16))),
         child: ListTile(
           minVerticalPadding: 18,
-          leading: const Icon(Icons.video_file_outlined),
+          leading: const Icon(Icons.file_download_outlined),
           title: Text(getStatusText(), style: context.textTheme.labelLarge),
           trailing: IconButton(
             icon: Icon(

@@ -33,9 +33,28 @@ void main() {
     test('appConfig returns key defaults when DB is empty', () {
       expect(sut.appConfig.logLevel, LogLevel.info);
     });
+
+    test('audio cellular backup is disabled by default', () {
+      expect(sut.appConfig.backup.useCellularForAudio, isFalse);
+    });
   });
 
   group('write', () {
+    test('persists the audio cellular preference independently across refreshes', () async {
+      await sut.write(.backupUseCellularForAudio, true);
+      await sut.refresh();
+
+      expect(sut.appConfig.backup.useCellularForAudio, isTrue);
+      expect(sut.appConfig.backup.useCellularForPhotos, isFalse);
+      expect(sut.appConfig.backup.useCellularForVideos, isFalse);
+
+      await sut.write(.backupUseCellularForAudio, false);
+      await sut.refresh();
+
+      expect(sut.appConfig.backup.useCellularForAudio, isFalse);
+      expect(await ctx.db.select(ctx.db.settingsEntity).get(), isEmpty);
+    });
+
     test('persists a value and reflects it in the composed view', () async {
       await sut.write(.themeMode, ThemeMode.dark);
       expect(sut.appConfig.theme.mode, ThemeMode.dark);

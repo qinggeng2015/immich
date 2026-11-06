@@ -12,6 +12,7 @@ import 'package:immich_mobile/entities/store.entity.dart';
 import 'package:immich_mobile/extensions/network_capability_extensions.dart';
 import 'package:immich_mobile/extensions/platform_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/infrastructure/repositories/audio_support.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/backup.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/settings.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/storage.repository.dart';
@@ -22,6 +23,7 @@ import 'package:immich_mobile/providers/infrastructure/platform.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/storage.provider.dart';
 import 'package:immich_mobile/repositories/asset_media.repository.dart';
 import 'package:immich_mobile/repositories/upload.repository.dart';
+import 'package:immich_mobile/services/server_info.service.dart';
 import 'package:logging/logging.dart';
 import 'package:openapi/api.dart';
 import 'package:path/path.dart' as p;
@@ -46,6 +48,7 @@ final foregroundUploadServiceProvider = Provider((ref) {
     ref.watch(connectivityApiProvider),
     ref.watch(assetMediaRepositoryProvider),
     ref.watch(assetServiceProvider),
+    audioSupport: AudioSupportRepository(ref.watch(serverInfoServiceProvider)),
   );
 });
 
@@ -61,8 +64,13 @@ class ForegroundUploadService {
     this._backupRepository,
     this._connectivityApi,
     this._assetMediaRepository,
-    this._assetService,
-  );
+    this._assetService, {
+    this._audioSupport,
+  });
+
+  final AudioSupportRepository? _audioSupport;
+
+  Future<bool> _supportsAudio() async => await _audioSupport?.isSupported() ?? false;
 
   final UploadRepository _uploadRepository;
   final StorageRepository _storageRepository;
@@ -74,12 +82,12 @@ class ForegroundUploadService {
 
   bool shouldAbortUpload = false;
 
-  Future<({int total, int remainder, int processing})> getBackupCounts(String userId) {
-    return _backupRepository.getAllCounts(userId);
+  Future<({int total, int remainder, int processing})> getBackupCounts(String userId) async {
+    return _backupRepository.getAllCounts(userId, includeAudio: await _supportsAudio());
   }
 
-  Future<List<LocalAsset>> getBackupCandidates(String userId, {bool onlyHashed = true}) {
-    return _backupRepository.getCandidates(userId, onlyHashed: onlyHashed);
+  Future<List<LocalAsset>> getBackupCandidates(String userId, {bool onlyHashed = true}) async {
+    return _backupRepository.getCandidates(userId, onlyHashed: onlyHashed, includeAudio: await _supportsAudio());
   }
 
   /// Bulk upload of backup candidates from selected albums
@@ -89,26 +97,20 @@ class ForegroundUploadService {
     UploadCallbacks callbacks = const UploadCallbacks(),
     bool useSequentialUpload = false,
   }) async {
-    final candidates = await _backupRepository.getCandidates(userId);
+    final candidates = await getBackupCandidates(userId);
     if (candidates.isEmpty) {
       return;
     }
 
-    final networkCapabilities = await _connectivityApi.getCapabilities();
-    final hasWifi = networkCapabilities.isUnmetered;
-    _logger.info('Network capabilities: $networkCapabilities, hasWifi/isUnmetered: $hasWifi');
-
     if (useSequentialUpload) {
-      await _uploadSequentially(items: candidates, cancelToken: cancelToken, hasWifi: hasWifi, callbacks: callbacks);
+      await _uploadSequentially(items: candidates, cancelToken: cancelToken, callbacks: callbacks);
     } else {
       await _executeWithWorkerPool<LocalAsset>(
         items: candidates,
         cancelToken: cancelToken,
-        shouldSkip: (asset) {
-          final requireWifi = _shouldRequireWiFi(asset);
-          return requireWifi && !hasWifi;
-        },
-        processItem: (asset) => uploadSingleAsset(asset, cancelToken, callbacks: callbacks),
+        shouldSkip: (asset) async => !await _hasRequiredNetwork(asset),
+        processItem: (asset) =>
+            uploadSingleAsset(asset, cancelToken, callbacks: callbacks, respectNetworkRequirements: true),
       );
     }
   }
@@ -117,7 +119,6 @@ class ForegroundUploadService {
   Future<void> _uploadSequentially({
     required List<LocalAsset> items,
     required Completer<void> cancelToken,
-    required bool hasWifi,
     required UploadCallbacks callbacks,
   }) async {
     await _storageRepository.clearCache();
@@ -128,13 +129,12 @@ class ForegroundUploadService {
         break;
       }
 
-      final requireWifi = _shouldRequireWiFi(asset);
-      if (requireWifi && !hasWifi) {
+      if (!await _hasRequiredNetwork(asset)) {
         _logger.warning('Skipping upload for ${asset.id} because it requires WiFi');
         continue;
       }
 
-      await uploadSingleAsset(asset, cancelToken, callbacks: callbacks);
+      await uploadSingleAsset(asset, cancelToken, callbacks: callbacks, respectNetworkRequirements: true);
     }
   }
 
@@ -204,7 +204,7 @@ class ForegroundUploadService {
     required List<T> items,
     required Completer<void>? cancelToken,
     required Future<void> Function(T item) processItem,
-    bool Function(T item)? shouldSkip,
+    FutureOr<bool> Function(T item)? shouldSkip,
     int concurrentWorkers = 3,
   }) async {
     await _storageRepository.clearCache();
@@ -226,7 +226,7 @@ class ForegroundUploadService {
 
         final item = items[index];
 
-        if (shouldSkip?.call(item) ?? false) {
+        if (shouldSkip != null && await shouldSkip(item)) {
           continue;
         }
 
@@ -247,8 +247,13 @@ class ForegroundUploadService {
     LocalAsset asset,
     Completer<void>? cancelToken, {
     required UploadCallbacks callbacks,
+    bool respectNetworkRequirements = false,
   }) async {
     final t = StaticTranslations.instance;
+    if (asset.isAudio && !await _supportsAudio()) {
+      callbacks.onError?.call(asset.id, t.audio_not_supported);
+      return;
+    }
     final assetNotFoundOnDevice = CurrentPlatform.isAndroid
         ? t.asset_not_found_on_device_android
         : t.asset_not_found_on_device_ios;
@@ -262,8 +267,10 @@ class ForegroundUploadService {
         return;
       }
 
-      final entity = await _storageRepository.getAssetEntityForAsset(asset);
-      if (entity == null) {
+      final requiresMediaEntity = !asset.isAudio && !asset.id.startsWith('saf-file:');
+      final entity = requiresMediaEntity ? await _storageRepository.getAssetEntityForAsset(asset) : null;
+      final isLivePhoto = entity?.isLivePhoto ?? false;
+      if (entity == null && requiresMediaEntity) {
         callbacks.onError?.call(asset.localId!, assetNotFoundOnDevice);
         return;
       }
@@ -284,7 +291,7 @@ class ForegroundUploadService {
 
         try {
           file = await _storageRepository.loadFileFromCloud(asset.id, progressHandler: progressHandler);
-          if (entity.isLivePhoto) {
+          if (isLivePhoto) {
             livePhotoFile = await _storageRepository.loadMotionFileFromCloud(
               asset.id,
               progressHandler: progressHandler,
@@ -303,7 +310,7 @@ class ForegroundUploadService {
         }
 
         // For live photos, get the motion video file
-        if (entity.isLivePhoto) {
+        if (isLivePhoto) {
           livePhotoFile = await _storageRepository.getMotionFileForAsset(asset);
           if (livePhotoFile == null) {
             _logger.warning("Failed to obtain motion part of the livePhoto - ${asset.name}");
@@ -318,7 +325,7 @@ class ForegroundUploadService {
         return;
       }
 
-      final fileName = await _assetMediaRepository.getOriginalFilename(asset.id) ?? asset.name;
+      final fileName = (asset.isAudio ? null : await _assetMediaRepository.getOriginalFilename(asset.id)) ?? asset.name;
       // Some apps (e.g. DJI/Fusion) return names without an extension; fall back to the asset name for those.
       final extension = p.extension(file.path).isNotEmpty ? p.extension(file.path) : p.extension(asset.name);
       final originalFileName = p.setExtension(fileName, extension);
@@ -336,7 +343,10 @@ class ForegroundUploadService {
 
       // Upload live photo video first if available
       String? livePhotoVideoId;
-      if (entity.isLivePhoto && livePhotoFile != null) {
+      if (isLivePhoto && livePhotoFile != null) {
+        if (respectNetworkRequirements && !await _hasRequiredNetwork(asset)) {
+          return;
+        }
         final livePhotoTitle = p.setExtension(originalFileName, p.extension(livePhotoFile.path));
 
         final onProgress = callbacks.onProgress;
@@ -377,6 +387,9 @@ class ForegroundUploadService {
         ]);
       }
 
+      if (respectNetworkRequirements && !await _hasRequiredNetwork(asset)) {
+        return;
+      }
       final onProgress = callbacks.onProgress;
       final result = await _uploadRepository.uploadFile(
         file: file,
@@ -410,7 +423,7 @@ class ForegroundUploadService {
       _logger.severe(() => "Error backup asset: $error", stackTrace);
       callbacks.onError?.call(asset.localId!, error.toString());
     } finally {
-      if (Platform.isIOS) {
+      if (Platform.isIOS || asset.id.startsWith('saf-file:')) {
         try {
           await file?.delete();
           await livePhotoFile?.delete();
@@ -437,6 +450,9 @@ class ForegroundUploadService {
     void Function(int bytes, int totalBytes)? onProgress,
   }) async {
     try {
+      if (AudioSupportRepository.isAudioFilename(file.path) && !await _supportsAudio()) {
+        return UploadResult.error(errorMessage: StaticTranslations.instance.audio_not_supported);
+      }
       // ignore: avoid_slow_async_io
       final stats = await file.stat();
       final fileCreatedAt = stats.changed;
@@ -466,12 +482,22 @@ class ForegroundUploadService {
     }
   }
 
+  Future<bool> _hasRequiredNetwork(LocalAsset asset) async {
+    if (!_shouldRequireWiFi(asset)) {
+      return true;
+    }
+    return (await _connectivityApi.getCapabilities()).isUnmetered;
+  }
+
   bool _shouldRequireWiFi(LocalAsset asset) {
     final backup = SettingsRepository.instance.appConfig.backup;
     if (asset.isVideo && backup.useCellularForVideos) {
       return false;
     }
-    if (!asset.isVideo && backup.useCellularForPhotos) {
+    if (asset.isImage && backup.useCellularForPhotos) {
+      return false;
+    }
+    if (asset.isAudio && backup.useCellularForAudio) {
       return false;
     }
     return true;

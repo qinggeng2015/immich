@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:immich_mobile/domain/models/album/local_album.model.dart';
+import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/infrastructure/repositories/backup.repository.dart';
 import 'package:immich_mobile/utils/option.dart';
 
@@ -16,6 +17,40 @@ void main() {
 
   tearDown(() async {
     await ctx.dispose();
+  });
+
+  test('audio backup requires explicit server support without excluding photos and videos', () async {
+    final user = await ctx.newUser();
+    final album = await ctx.newLocalAlbum(backupSelection: BackupSelection.selected);
+    for (final type in [AssetType.image, AssetType.video, AssetType.audio]) {
+      final asset = await ctx.newLocalAsset(type: type);
+      await ctx.newLocalAlbumAsset(albumId: album.id, assetId: asset.id);
+    }
+
+    expect(
+      (await sut.getCandidates(user.id)).map((asset) => asset.type),
+      unorderedEquals([AssetType.image, AssetType.video]),
+    );
+    expect((await sut.getAllCounts(user.id)).total, 2);
+    expect(await sut.getCandidates(user.id, includeAudio: true), hasLength(3));
+    expect((await sut.getAllCounts(user.id, includeAudio: true)).total, 3);
+  });
+
+  test('audio backup respects excluded albums and existing remote checksums', () async {
+    final user = await ctx.newUser();
+    final selected = await ctx.newLocalAlbum(backupSelection: BackupSelection.selected);
+    final excluded = await ctx.newLocalAlbum(backupSelection: BackupSelection.excluded);
+    final remote = await ctx.newRemoteAsset(ownerId: user.id, type: AssetType.audio);
+    final backedUp = await ctx.newLocalAsset(type: AssetType.audio, checksum: remote.checksum);
+    final excludedAudio = await ctx.newLocalAsset(type: AssetType.audio);
+    await ctx.newLocalAlbumAsset(albumId: selected.id, assetId: backedUp.id);
+    await ctx.newLocalAlbumAsset(albumId: selected.id, assetId: excludedAudio.id);
+    await ctx.newLocalAlbumAsset(albumId: excluded.id, assetId: excludedAudio.id);
+
+    expect(await sut.getCandidates(user.id, includeAudio: true), isEmpty);
+    final counts = await sut.getAllCounts(user.id, includeAudio: true);
+    expect(counts.total, 1);
+    expect(counts.remainder, 0);
   });
 
   group('getAllCounts', () {

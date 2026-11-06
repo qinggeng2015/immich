@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/services/timeline.service.dart';
+import 'package:immich_mobile/presentation/widgets/asset_viewer/audio_cover.widget.dart';
 import 'package:immich_mobile/presentation/widgets/images/image_provider.dart';
 import 'package:immich_mobile/presentation/widgets/images/progressive_image.widget.dart';
 
@@ -167,27 +168,29 @@ class _RandomAssetBackgroundImageState extends State<RandomAssetBackgroundImage>
                     child: SizedBox(
                       width: double.infinity,
                       height: double.infinity,
-                      child: ProgressiveImage(
-                        provider: getFullImageProvider(_currentAsset!),
-                        builder: (context, provider) => Image(
-                          alignment: Alignment.topRight,
-                          image: provider,
-                          fit: BoxFit.cover,
-                          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-                            if (wasSynchronouslyLoaded || frame != null) {
-                              return child;
-                            }
-                            return Container();
-                          },
-                          errorBuilder: (context, error, stackTrace) {
-                            return SizedBox(
-                              width: double.infinity,
-                              height: double.infinity,
-                              child: Icon(Icons.error_outline_rounded, size: 24, color: Colors.red[300]),
-                            );
-                          },
-                        ),
-                      ),
+                      child: _currentAsset!.isAudio
+                          ? AudioCover(asset: _currentAsset!)
+                          : ProgressiveImage(
+                              provider: getFullImageProvider(_currentAsset!),
+                              builder: (context, provider) => Image(
+                                alignment: Alignment.topRight,
+                                image: provider,
+                                fit: BoxFit.cover,
+                                frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                                  if (wasSynchronouslyLoaded || frame != null) {
+                                    return child;
+                                  }
+                                  return Container();
+                                },
+                                errorBuilder: (context, error, stackTrace) {
+                                  return SizedBox(
+                                    width: double.infinity,
+                                    height: double.infinity,
+                                    child: Icon(Icons.error_outline_rounded, size: 24, color: Colors.red[300]),
+                                  );
+                                },
+                              ),
+                            ),
                     ),
                   ),
 
@@ -197,27 +200,29 @@ class _RandomAssetBackgroundImageState extends State<RandomAssetBackgroundImage>
                     child: SizedBox(
                       width: double.infinity,
                       height: double.infinity,
-                      child: ProgressiveImage(
-                        provider: getFullImageProvider(_nextAsset!),
-                        builder: (context, provider) => Image(
-                          alignment: Alignment.topRight,
-                          image: provider,
-                          fit: BoxFit.cover,
-                          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-                            if (wasSynchronouslyLoaded || frame != null) {
-                              return child;
-                            }
-                            return const SizedBox.shrink();
-                          },
-                          errorBuilder: (context, error, stackTrace) {
-                            return SizedBox(
-                              width: double.infinity,
-                              height: double.infinity,
-                              child: Icon(Icons.error_outline_rounded, size: 24, color: Colors.red[300]),
-                            );
-                          },
-                        ),
-                      ),
+                      child: _nextAsset!.isAudio
+                          ? AudioCover(asset: _nextAsset!)
+                          : ProgressiveImage(
+                              provider: getFullImageProvider(_nextAsset!),
+                              builder: (context, provider) => Image(
+                                alignment: Alignment.topRight,
+                                image: provider,
+                                fit: BoxFit.cover,
+                                frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                                  if (wasSynchronouslyLoaded || frame != null) {
+                                    return child;
+                                  }
+                                  return const SizedBox.shrink();
+                                },
+                                errorBuilder: (context, error, stackTrace) {
+                                  return SizedBox(
+                                    width: double.infinity,
+                                    height: double.infinity,
+                                    child: Icon(Icons.error_outline_rounded, size: 24, color: Colors.red[300]),
+                                  );
+                                },
+                              ),
+                            ),
                     ),
                   ),
               ],

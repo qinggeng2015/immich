@@ -22,7 +22,7 @@ Future<void> resolveCloudIds(
   }
 
   final logger = Logger('resolveCloudIds');
-  for (final batch in assetIds.slices(kCloudIdChunkSize)) {
+  for (final batch in assetIds.where((id) => !id.startsWith('audio-file:')).slices(kCloudIdChunkSize)) {
     if (cancellation?.isCompleted ?? false) {
       logger.warning('Cloud ID resolution cancelled');
       return;

@@ -77,6 +77,25 @@ void main() {
 
       expect(find.byType(ImmichIconButton), findsNothing);
     });
+
+    for (final mixed in [false, true]) {
+      testWidgets('hides gallery download for ${mixed ? 'mixed audio and photo' : 'audio only'} selections', (
+        tester,
+      ) async {
+        final audio = owned().copyWith(type: .audio);
+        await tester.pumpTestWidget(
+          context,
+          const ActionIconButton(action: DownloadAction(source: .timeline)),
+          overrides: [
+            ...context.selected({audio, if (mixed) owned()}),
+            downloadRepositoryProvider.overrideWithValue(context.repository.download.repo),
+          ],
+        );
+
+        expect(find.byType(ImmichIconButton), findsNothing);
+        verifyNever(() => context.repository.download.repo.downloadAllAssets(any()));
+      });
+    }
   });
 
   group('TagAction', () {

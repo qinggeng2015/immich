@@ -1,4 +1,4 @@
-import { SeededRandom } from '#test/medium/mock/helpers.ts';
+import { SeededRandom } from '#test/medium/mock/random.ts';
 import {
   AlbumUserRole,
   AssetOrder,

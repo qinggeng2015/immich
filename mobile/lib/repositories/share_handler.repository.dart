@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:immich_mobile/infrastructure/repositories/audio_support.repository.dart';
 import 'package:immich_mobile/models/upload/share_intent_attachment.model.dart';
 import 'package:share_handler/share_handler.dart';
 
@@ -34,7 +35,9 @@ class ShareHandlerRepository {
         continue;
       }
 
-      final type = attachment.type == SharedAttachmentType.image
+      final type = AudioSupportRepository.isAudioFilename(attachment.path)
+          ? ShareIntentAttachmentType.audio
+          : attachment.type == SharedAttachmentType.image
           ? ShareIntentAttachmentType.image
           : ShareIntentAttachmentType.video;
 

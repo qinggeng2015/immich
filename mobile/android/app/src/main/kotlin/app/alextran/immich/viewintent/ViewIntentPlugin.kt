@@ -15,10 +15,14 @@ import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.PluginRegistry
 import java.io.File
 import java.io.FileOutputStream
+import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 
 private const val TAG = "ViewIntentPlugin"
@@ -82,30 +86,45 @@ class ViewIntentPlugin : FlutterPlugin, ActivityAware, PluginRegistry.NewIntentL
     }
 
     ioScope.launch {
+      var tempFile: File? = null
       try {
-        val mimeType = context.contentResolver.getType(uri) ?: intent.type
-        if (mimeType == null || (!mimeType.startsWith("image/") && !mimeType.startsWith("video/"))) {
+        val mimeType = (context.contentResolver.getType(uri) ?: intent.type)
+          ?.substringBefore(';')?.trim()?.lowercase(Locale.ROOT)
+        val isAudio = mimeType?.startsWith("audio/") == true
+        if (mimeType == null || (!mimeType.startsWith("image/") && !mimeType.startsWith("video/") && !isAudio)) {
+          callback(Result.success(null))
+          return@launch
+        }
+        if (isAudio && uri.scheme != "content") {
           callback(Result.success(null))
           return@launch
         }
 
-        val localAssetId = extractLocalAssetId(context, uri, mimeType)
-        val tempFilePath = if (localAssetId == null) {
-          copyUriToTempFile(context, uri, mimeType)?.absolutePath ?: run {
+        val localAssetId = if (isAudio) null else extractLocalAssetId(context, uri, mimeType)
+        if (localAssetId == null) {
+          tempFile = copyUriToTempFile(context, uri, mimeType) ?: run {
             callback(Result.success(null))
             return@launch
           }
-        } else {
-          null
+        }
+        currentCoroutineContext().ensureActive()
+        if (unconsumedIntent != null && unconsumedIntent !== intent) {
+          tempFile?.delete()
+          callback(Result.success(null))
+          return@launch
         }
         val payload = ViewIntentPayload(
-          path = tempFilePath,
+          path = tempFile?.absolutePath,
           mimeType = mimeType,
           localAssetId = localAssetId,
         )
         consumeViewIntent(intent)
         callback(Result.success(payload))
+      } catch (e: CancellationException) {
+        tempFile?.delete()
+        throw e
       } catch (e: Exception) {
+        tempFile?.delete()
         callback(Result.failure(e))
       }
     }
@@ -143,17 +162,29 @@ class ViewIntentPlugin : FlutterPlugin, ActivityAware, PluginRegistry.NewIntentL
     return if (id >= 0) id.toString() else null
   }
 
-  private fun copyUriToTempFile(context: Context, uri: Uri, mimeType: String): File? {
+  private suspend fun copyUriToTempFile(context: Context, uri: Uri, mimeType: String): File? {
+    var tempFile: File? = null
     return try {
       val extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)?.let { ".$it" }
-      val tempFile = File.createTempFile("view_intent_", extension, context.cacheDir)
       context.contentResolver.openInputStream(uri)?.use { inputStream ->
-        FileOutputStream(tempFile).use { outputStream ->
-          inputStream.copyTo(outputStream)
+        val outputFile = File.createTempFile("view_intent_", extension, context.cacheDir)
+        tempFile = outputFile
+        FileOutputStream(outputFile).use { outputStream ->
+          val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+          while (true) {
+            currentCoroutineContext().ensureActive()
+            val count = inputStream.read(buffer)
+            if (count == -1) break
+            outputStream.write(buffer, 0, count)
+          }
         }
       } ?: return null
       tempFile
+    } catch (e: CancellationException) {
+      tempFile?.delete()
+      throw e
     } catch (_: Exception) {
+      tempFile?.delete()
       null
     }
   }

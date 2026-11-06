@@ -4,6 +4,49 @@ import '../../unit/factories/local_asset_factory.dart';
 import '../../unit/factories/remote_asset_factory.dart';
 
 void main() {
+  test('audio uses a square aspect ratio for missing, zero, or embedded-cover dimensions', () {
+    for (final dimensions in [(0, 0), (100, 200), (-1, 0)]) {
+      final audio = RemoteAssetFactory.create(type: .audio).copyWith(width: dimensions.$1, height: dimensions.$2);
+      expect(audio.aspectRatio, 1);
+      expect(audio.aspectRatio.isFinite, isTrue);
+    }
+    expect(RemoteAssetFactory.create(type: .audio).aspectRatio, 1);
+  });
+
+  test('photo and video dimensions preserve their display aspect ratio', () {
+    final photo = RemoteAssetFactory.create(type: .image).copyWith(width: 1200, height: 600);
+    final video = RemoteAssetFactory.create(type: .video).copyWith(width: 600, height: 1200);
+    expect(photo.aspectRatio, 2);
+    expect(video.aspectRatio, 0.5);
+    expect(photo.hasDimensions, isTrue);
+    expect(video.hasDimensions, isTrue);
+    expect(photo.copyWith(height: 0).aspectRatio, 1);
+    expect(photo.copyWith(height: 0).hasDimensions, isFalse);
+  });
+
+  test('audio has duration but does not enable image or video features', () {
+    final audio = RemoteAssetFactory.create(type: .audio).copyWith(durationMs: 65000);
+
+    expect(audio.isAudio, isTrue);
+    expect(audio.isImage, isFalse);
+    expect(audio.isVideo, isFalse);
+    expect(audio.isEditable, isFalse);
+    expect(audio.isMotionPhoto, isFalse);
+    expect(audio.duration, const Duration(seconds: 65));
+  });
+
+  test('image and video retain their existing type classification', () {
+    final image = RemoteAssetFactory.create(type: .image);
+    final video = RemoteAssetFactory.create(type: .video);
+
+    expect(image.isImage, isTrue);
+    expect(image.isAudio, isFalse);
+    expect(image.isEditable, isTrue);
+    expect(video.isVideo, isTrue);
+    expect(video.isAudio, isFalse);
+    expect(video.isEditable, isFalse);
+  });
+
   group('BaseAsset.refersToSameAsset', () {
     test('search/folder copy (localId null) matches the merged DB copy (localId set)', () {
       // #29472: search and folder assets arrive with localId null, then the viewer

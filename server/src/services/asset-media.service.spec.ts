@@ -133,16 +133,38 @@ const uploadTests = [
     invalid: ['.html', '.xml'],
   },
   {
+    label: 'asset audio',
+    fieldName: UploadFieldName.ASSET_DATA,
+    valid: [
+      '.aac',
+      '.aif',
+      '.aiff',
+      '.alac',
+      '.amr',
+      '.caf',
+      '.flac',
+      '.m4a',
+      '.m4b',
+      '.mp3',
+      '.oga',
+      '.ogg',
+      '.opus',
+      '.wav',
+      '.wma',
+    ],
+    invalid: ['.exe', '.html', '.xml'],
+  },
+  {
     label: 'sidecar',
     fieldName: UploadFieldName.SIDECAR_DATA,
     valid: ['.xmp'],
-    invalid: ['.html', '.jpeg', '.jpg', '.mov', '.mp4', '.xml'],
+    invalid: ['.html', '.jpeg', '.jpg', '.mov', '.mp3', '.mp4', '.xml'],
   },
   {
     label: 'profile',
     fieldName: UploadFieldName.PROFILE_DATA,
     valid: ['.avif', '.dng', '.heic', '.heif', '.jpeg', '.jpg', '.png', '.webp'],
-    invalid: ['.arf', '.cr2', '.html', '.mov', '.mp4', '.xml'],
+    invalid: ['.arf', '.cr2', '.html', '.mov', '.mp3', '.mp4', '.xml'],
   },
 ];
 
@@ -816,6 +838,22 @@ describe(AssetMediaService.name, () => {
           path: '/path/to/encoded/video.mp4',
           cacheControl: CacheControl.PrivateWithCache,
           contentType: 'video/mp4',
+        }),
+      );
+    });
+
+    it.each([
+      { originalPath: '/recording.flac', encodedVideoPath: '/encoded.mp4', contentType: 'audio/mp4' },
+      { originalPath: '/recording.mp3', encodedVideoPath: null, contentType: 'audio/mpeg' },
+    ])('should serve audio with the correct content type ($contentType)', async ({ contentType, ...asset }) => {
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set(['audio-id']));
+      mocks.asset.getForVideo.mockResolvedValue(asset);
+
+      await expect(sut.playbackVideo(authStub.admin, 'audio-id')).resolves.toEqual(
+        new ImmichFileResponse({
+          path: asset.encodedVideoPath ?? asset.originalPath,
+          cacheControl: asset.encodedVideoPath ? CacheControl.PrivateWithCache : CacheControl.PrivateWithoutCache,
+          contentType,
         }),
       );
     });

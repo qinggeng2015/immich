@@ -1,7 +1,7 @@
 import { loadImage } from '#lib/actions/image-loader.svelte.ts';
 import { getAssetUrls } from '#lib/utils.ts';
 import { AdaptiveImageLoader, type QualityList } from '#lib/utils/adaptive-image-loader.svelte.ts';
-import type { AssetResponseDto, SharedLinkResponseDto } from '@immich/sdk';
+import { AssetTypeEnum, type AssetResponseDto, type SharedLinkResponseDto } from '@immich/sdk';
 
 type AssetCursor = {
   current: AssetResponseDto;
@@ -17,7 +17,7 @@ export class PreloadManager {
     asset: AssetResponseDto | undefined,
     sharedlink: SharedLinkResponseDto | undefined,
   ): AdaptiveImageLoader | undefined {
-    if (!asset) {
+    if (!asset || asset.type === AssetTypeEnum.Audio) {
       return;
     }
     const urls = getAssetUrls(asset, sharedlink);

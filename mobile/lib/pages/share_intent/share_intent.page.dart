@@ -90,10 +90,12 @@ class ShareIntentPage extends ConsumerWidget {
                     borderRadius: const BorderRadius.all(Radius.circular(16)),
                     child: attachment.isImage
                         ? Image.file(attachment.file, width: 64, height: 64, fit: BoxFit.cover)
-                        : const SizedBox(
+                        : SizedBox(
                             width: 64,
                             height: 64,
-                            child: Center(child: Icon(Icons.videocam, color: Colors.white)),
+                            child: Center(
+                              child: Icon(attachment.isAudio ? Icons.play_circle : Icons.videocam, color: Colors.white),
+                            ),
                           ),
                   ),
                   if (attachment.isImage)

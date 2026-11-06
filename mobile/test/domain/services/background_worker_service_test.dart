@@ -59,7 +59,7 @@ void main() {
     mockRemoteSyncService = MockSyncStreamService();
     mockBackgroundUploadService = MockBackgroundUploadService();
 
-    when(() => mockLocalSyncService.sync()).thenAnswer((_) async {});
+    when(() => mockLocalSyncService.sync()).thenAnswer((_) async => LocalSyncResult.completed);
     when(() => mockHashService.hashAssets()).thenAnswer((_) async {});
     when(() => mockUserService.tryGetMyUser()).thenReturn(UserStub.admin);
     when(() => mockUserService.watchMyUser()).thenAnswer((_) => const Stream.empty());

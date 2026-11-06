@@ -16,7 +16,7 @@
   const disabled = $derived(featureFlagsManager.value.configFile);
   let configToEdit = $state(cloneDeep(config));
 
-  const queueNames = [
+  const queueNames = $derived([
     QueueName.ThumbnailGeneration,
     QueueName.MetadataExtraction,
     QueueName.Library,
@@ -28,7 +28,10 @@
     QueueName.StorageTemplateMigration,
     QueueName.Migration,
     QueueName.Ocr,
-  ];
+    ...(featureFlagsManager.supportsAudioWaveform ? [QueueName.AudioWaveform] : []),
+    ...(featureFlagsManager.supportsSpeechToText ? [QueueName.SpeechToText] : []),
+    ...(featureFlagsManager.supportsAudioSummary ? [QueueName.AudioSummary] : []),
+  ]);
 
   function isSystemConfigJobDto(jobName: string): jobName is keyof AdminConfigJobDto {
     return Object.hasOwn(configToEdit.job, jobName);
@@ -51,6 +54,9 @@
     [QueueName.Notifications]: $t('notifications'),
     [QueueName.BackupDatabase]: $t('admin.backup_database'),
     [QueueName.Ocr]: $t('admin.machine_learning_ocr'),
+    [QueueName.AudioWaveform]: $t('admin.audio_waveform_job'),
+    [QueueName.SpeechToText]: $t('admin.audio_transcription_job'),
+    [QueueName.AudioSummary]: $t('admin.audio_summary_job'),
     [QueueName.Workflow]: $t('workflows'),
     [QueueName.Editor]: $t('editor'),
     [QueueName.IntegrityCheck]: $t('integrity_checks'),
@@ -61,16 +67,16 @@
   <div in:fade={{ duration: 500 }}>
     <form autocomplete="off" onsubmit={(event) => event.preventDefault()}>
       {#each queueNames as queueName (queueName)}
-        <div class="ms-4 mt-4 flex flex-col gap-4">
-          {#if isSystemConfigJobDto(queueName)}
+        <div class="ms-4 mt-4 flex flex-col gap-4" data-queue-settings={queueName}>
+          {#if isSystemConfigJobDto(queueName) && configToEdit.job[queueName] && config.job[queueName]}
             <SettingInputField
               inputType={SettingInputFieldType.NUMBER}
               {disabled}
               label={$t('admin.job_concurrency', { values: { job: queueTitles[queueName] } })}
               description=""
-              bind:value={configToEdit.job[queueName].concurrency}
+              bind:value={configToEdit.job[queueName]!.concurrency}
               required={true}
-              isEdited={configToEdit.job[queueName].concurrency !== config.job[queueName].concurrency}
+              isEdited={configToEdit.job[queueName]!.concurrency !== config.job[queueName]!.concurrency}
             />
           {:else}
             <SettingInputField

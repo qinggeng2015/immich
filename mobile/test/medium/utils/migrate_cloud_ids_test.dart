@@ -44,6 +44,17 @@ void main() {
   }
 
   group('populateCloudIds', () {
+    test('folder audio files are not sent to PhotoKit cloud ID resolution', () async {
+      await ctx.newLocalAsset(id: 'audio-file:folder:file:version:size', iCloudIdOption: const .none());
+      await ctx.newLocalAsset(id: 'photo', iCloudIdOption: const .none());
+      resolvingAllInputs();
+
+      await populateMissingCloudIds(ctx.db, mockNativeSyncApi, .new());
+
+      verify(() => mockNativeSyncApi.getCloudIdForAssetIds(['photo'])).called(1);
+      expect(await readCloudIds(), [null, 'cloud-photo']);
+    });
+
     test('writes the cloud ID resolved for each asset', () async {
       await ctx.newLocalAsset(id: 'asset-0', iCloudIdOption: const .none());
       resolvingAllInputs();

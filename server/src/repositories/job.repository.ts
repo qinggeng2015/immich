@@ -255,6 +255,9 @@ export class JobRepository {
 
   private getJobOptions(item: JobItem): JobsOptions | null {
     switch (item.name) {
+      case JobName.AssetSummarize: {
+        return { deduplication: { id: `audio-summary-${item.data.id}`, keepLastIfActive: true } };
+      }
       case JobName.NotifyAlbumUpdate: {
         return {
           jobId: `${item.data.id}/${item.data.recipientId}`,

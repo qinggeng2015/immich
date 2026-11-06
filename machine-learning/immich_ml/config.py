@@ -38,6 +38,7 @@ class PreloadModelData(BaseModel):
     clip: ClipSettings = ClipSettings()
     facial_recognition: FacialRecognitionSettings = FacialRecognitionSettings()
     ocr: OcrSettings = OcrSettings()
+    speech_to_text: str | None = None
 
 
 class MaxBatchSize(BaseModel):

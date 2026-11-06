@@ -102,6 +102,10 @@ export class ServerService extends BaseService {
 
     return {
       smartSearch: isSmartSearchEnabled(machineLearning),
+      audio: true,
+      audioWaveform: true,
+      speechToText: true,
+      audioSummary: true,
       facialRecognition: isFacialRecognitionEnabled(machineLearning),
       duplicateDetection: isDuplicateDetectionEnabled(machineLearning),
       map: map.enabled,
@@ -178,6 +182,7 @@ export class ServerService extends BaseService {
 
   getSupportedMediaTypes(): ServerMediaTypesResponseDto {
     return {
+      audio: Object.keys(mimeTypes.audio),
       video: Object.keys(mimeTypes.video),
       image: Object.keys(mimeTypes.image),
       sidecar: Object.keys(mimeTypes.sidecar),

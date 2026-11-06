@@ -38,7 +38,7 @@ class ShareAction extends AssetActionBuilder {
 
   Future<void> _promptQualityAndShare(BuildContext context, WidgetRef ref, List<BaseAsset> assets) async {
     // Only show preview option when at least one of the assets is not a video
-    final showPreview = assets.any((asset) => !asset.isVideo);
+    final showPreview = assets.any((asset) => asset.isImage);
 
     final fileType = await showDialog<ShareAssetType>(
       context: context,

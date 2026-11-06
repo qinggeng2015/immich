@@ -5,12 +5,14 @@ import 'dart:io';
 
 import 'package:background_downloader/background_downloader.dart';
 import 'package:collection/collection.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/services.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/models/download/livephotos_medatada.model.dart';
 import 'package:immich_mobile/repositories/download.repository.dart';
 import 'package:immich_mobile/repositories/file_media.repository.dart';
 import 'package:logging/logging.dart';
+import 'package:path/path.dart' as p;
 
 final downloadServiceProvider = Provider(
   (ref) => DownloadService(ref.watch(fileMediaRepositoryProvider), ref.watch(downloadRepositoryProvider)),
@@ -22,15 +24,18 @@ class DownloadService {
   final Logger _log = Logger("DownloadService");
   void Function(TaskStatusUpdate)? onImageDownloadStatus;
   void Function(TaskStatusUpdate)? onVideoDownloadStatus;
+  void Function(TaskStatusUpdate)? onAudioDownloadStatus;
   void Function(TaskStatusUpdate)? onLivePhotoDownloadStatus;
   void Function(TaskProgressUpdate)? onTaskProgress;
 
   /// Active Live Photo IDs undergoing saving
   final Set<String> _savingLivePhotoIds = {};
+  final Set<String> _savingAudioIds = {};
 
   DownloadService(this._fileMediaRepository, this._downloadRepository) {
     _downloadRepository.onImageDownloadStatus = _onImageDownloadCallback;
     _downloadRepository.onVideoDownloadStatus = _onVideoDownloadCallback;
+    _downloadRepository.onAudioDownloadStatus = _onAudioDownloadCallback;
     _downloadRepository.onLivePhotoDownloadStatus = _onLivePhotoDownloadCallback;
     _downloadRepository.onTaskProgress = _onTaskProgressCallback;
     _downloadRepository.onLivePhotoRecordComplete = _onLivePhotoRecordComplete;
@@ -69,6 +74,93 @@ class DownloadService {
 
   void _onLivePhotoDownloadCallback(TaskStatusUpdate update) {
     onLivePhotoDownloadStatus?.call(update);
+  }
+
+  void _onAudioDownloadCallback(TaskStatusUpdate update) {
+    if (update.status == TaskStatus.complete) {
+      unawaited(_saveAudioAndUpdateStatus(update));
+      return;
+    }
+
+    onAudioDownloadStatus?.call(update);
+  }
+
+  Future<void> _saveAudioAndUpdateStatus(TaskStatusUpdate update) async {
+    if (!_savingAudioIds.add(update.task.taskId)) {
+      return;
+    }
+
+    try {
+      final saved = await _saveAudio(update);
+      onAudioDownloadStatus?.call(
+        saved
+            ? update
+            : update.copyWith(
+                status: TaskStatus.failed,
+                exception: TaskFileSystemException('Unable to save audio to shared storage'),
+              ),
+      );
+    } finally {
+      _savingAudioIds.remove(update.task.taskId);
+    }
+  }
+
+  Future<bool> _saveAudio(TaskStatusUpdate update) async {
+    if (!Platform.isAndroid) {
+      return false;
+    }
+
+    try {
+      final mimeType = _audioMimeType(update);
+      if (mimeType == null) {
+        return false;
+      }
+
+      final file = File(await update.task.filePath());
+      final downloader = FileDownloader();
+      final androidInfo = await DeviceInfoPlugin().androidInfo;
+      if (androidInfo.version.sdkInt < 29) {
+        final path = await downloader.moveFileToSharedStorage(
+          file.path,
+          SharedStorage.audio,
+          directory: 'Immich',
+          mimeType: mimeType,
+        );
+        return path != null;
+      }
+
+      final uri = await downloader.uri.moveFileToSharedStorage(
+        file.uri,
+        SharedStorage.audio,
+        directory: 'Immich',
+        mimeType: mimeType,
+      );
+      return uri != null;
+    } catch (error, stack) {
+      _log.severe('Error saving audio', error, stack);
+      return false;
+    }
+  }
+
+  String? _audioMimeType(TaskStatusUpdate update) {
+    final mimeType = update.mimeType?.split(';').first.trim().toLowerCase();
+    if (mimeType?.startsWith('audio/') == true) {
+      return mimeType;
+    }
+
+    return switch (p.extension(update.task.filename).toLowerCase()) {
+      '.aac' => 'audio/aac',
+      '.aif' || '.aiff' => 'audio/aiff',
+      '.alac' || '.m4a' || '.m4b' => 'audio/mp4',
+      '.amr' => 'audio/amr',
+      '.caf' => 'audio/x-caf',
+      '.flac' => 'audio/flac',
+      '.mp3' => 'audio/mpeg',
+      '.oga' || '.ogg' || '.opus' => 'audio/ogg',
+      '.wav' => 'audio/wav',
+      '.wma' => 'audio/x-ms-wma',
+      _ => null,
+    };
   }
 
   Future<void> _onLivePhotoRecordComplete(TaskRecord record) async {

@@ -97,6 +97,18 @@ void main() {
       userId = user.id;
     });
 
+    test('folder audio originals are not included in device gallery cleanup', () async {
+      final remote = await ctx.newRemoteAsset(ownerId: userId, type: AssetType.audio);
+      await ctx.newLocalAsset(
+        id: 'audio-file:folder:file:version:size',
+        type: AssetType.audio,
+        checksum: remote.checksum,
+        createdAt: beforeCutoff,
+      );
+      final result = await sut.getRemovalCandidates(userId, cutoffDate);
+      expect(result.assets, isEmpty);
+    });
+
     test('returns only assets that match all criteria', () async {
       final otherUser = await ctx.newUser();
 

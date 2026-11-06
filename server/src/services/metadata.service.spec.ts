@@ -690,6 +690,65 @@ describe(MetadataService.name, () => {
       await sut.handleMetadataExtraction({ id: asset.id });
     });
 
+    it.each([videoInfoStub.noVideoStreams, videoInfoStub.videoStreamHDR10])(
+      'should extract audio duration and ignore any embedded cover video stream',
+      async (probe) => {
+        const asset = AssetFactory.create({ type: AssetType.Audio, originalPath: '/recording.mp3' });
+        mocks.assetJob.getForMetadataExtraction.mockResolvedValue(getForMetadataExtraction(asset));
+        mocks.media.probe.mockResolvedValue({ ...probe, format: { ...probe.format, duration: 125.25 } });
+        mockReadTags({ Duration: 999, ContentIdentifier: 'live-photo-id', MotionPhoto: 1 });
+
+        await sut.handleMetadataExtraction({ id: asset.id });
+
+        expect(mocks.media.probe).toHaveBeenCalledWith(asset.originalPath);
+        expect(mocks.media.probePackets).not.toHaveBeenCalled();
+        expect(mocks.media.probeAudioDuration).not.toHaveBeenCalled();
+        expect(mocks.asset.update).toHaveBeenCalledWith(expect.objectContaining({ id: asset.id, duration: 125_250 }));
+        expect(mocks.asset.upsertExif).toHaveBeenCalledWith(
+          expect.objectContaining({
+            audio: expect.objectContaining({ assetId: asset.id, codecName: probe.audioStreams[0].codecName }),
+            video: undefined,
+            keyframes: undefined,
+          }),
+        );
+        expect(mocks.asset.findLivePhotoMatch).not.toHaveBeenCalled();
+        expect(mocks.storage.createOrOverwriteFile).not.toHaveBeenCalled();
+      },
+    );
+
+    it('should recover the duration of audio with no container duration', async () => {
+      const asset = AssetFactory.create({ type: AssetType.Audio, originalPath: '/streamed.flac' });
+      mocks.assetJob.getForMetadataExtraction.mockResolvedValue(getForMetadataExtraction(asset));
+      mocks.media.probe.mockResolvedValue(videoInfoStub.noVideoStreams);
+      mocks.media.probeAudioDuration.mockResolvedValue(125.25);
+
+      await sut.handleMetadataExtraction({ id: asset.id });
+
+      expect(mocks.media.probeAudioDuration).toHaveBeenCalledExactlyOnceWith(asset.originalPath, 3);
+      expect(mocks.asset.update).toHaveBeenCalledWith(expect.objectContaining({ id: asset.id, duration: 125_250 }));
+    });
+
+    it('should keep unknown audio duration unset when no valid packets exist', async () => {
+      const asset = AssetFactory.create({ type: AssetType.Audio, originalPath: '/empty.flac' });
+      mocks.assetJob.getForMetadataExtraction.mockResolvedValue(getForMetadataExtraction(asset));
+      mocks.media.probe.mockResolvedValue(videoInfoStub.noVideoStreams);
+      mocks.media.probeAudioDuration.mockResolvedValue(null);
+
+      await sut.handleMetadataExtraction({ id: asset.id });
+
+      expect(mocks.asset.update).toHaveBeenCalledWith(expect.objectContaining({ id: asset.id, duration: null }));
+    });
+
+    it('should not scan audio packets for video files missing container duration', async () => {
+      const asset = AssetFactory.create({ type: AssetType.Video });
+      mocks.assetJob.getForMetadataExtraction.mockResolvedValue(getForMetadataExtraction(asset));
+      mocks.media.probe.mockResolvedValue(videoInfoStub.noVideoStreams);
+
+      await sut.handleMetadataExtraction({ id: asset.id });
+
+      expect(mocks.media.probeAudioDuration).not.toHaveBeenCalled();
+    });
+
     it('should extract the correct video orientation', async () => {
       const asset = AssetFactory.create({ type: AssetType.Video });
       mocks.assetJob.getForMetadataExtraction.mockResolvedValue(getForMetadataExtraction(asset));

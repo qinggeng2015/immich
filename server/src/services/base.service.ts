@@ -18,6 +18,8 @@ import { AssetEditRepository } from 'src/repositories/asset-edit.repository.js';
 import { AssetFileRepository } from 'src/repositories/asset-file.repository.js';
 import { AssetJobRepository } from 'src/repositories/asset-job.repository.js';
 import { AssetRepository } from 'src/repositories/asset.repository.js';
+import { AudioAnalysisRepository } from 'src/repositories/audio-analysis.repository.js';
+import { AudioSummaryRepository } from 'src/repositories/audio-summary.repository.js';
 import { AuthChallengeRepository } from 'src/repositories/auth-challenge.repository.js';
 import { ClusterGroupRepository } from 'src/repositories/cluster-group.repository.js';
 import { ConfigRepository } from 'src/repositories/config.repository.js';
@@ -90,6 +92,8 @@ export const BASE_SERVICE_DEPENDENCIES = [
   AssetEditRepository,
   AssetFileRepository,
   AssetJobRepository,
+  AudioAnalysisRepository,
+  AudioSummaryRepository,
   AuthChallengeRepository,
   ClusterGroupRepository,
   ConfigRepository,
@@ -156,6 +160,8 @@ export class BaseService {
     protected assetEditRepository: AssetEditRepository,
     protected assetFileRepository: AssetFileRepository,
     protected assetJobRepository: AssetJobRepository,
+    protected audioAnalysisRepository: AudioAnalysisRepository,
+    protected audioSummaryRepository: AudioSummaryRepository,
     protected authChallengeRepository: AuthChallengeRepository,
     protected clusterGroupRepository: ClusterGroupRepository,
     protected configRepository: ConfigRepository,
@@ -231,6 +237,8 @@ export class BaseService {
       ctx.assetEditRepository,
       ctx.assetFileRepository,
       ctx.assetJobRepository,
+      ctx.audioAnalysisRepository,
+      ctx.audioSummaryRepository,
       ctx.authChallengeRepository,
       ctx.clusterGroupRepository,
       ctx.configRepository,

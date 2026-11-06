@@ -41,6 +41,9 @@ class VideoPlayerNotifier extends StateNotifier<VideoPlayerState> {
   Timer? _bufferingTimer;
   Timer? _seekTimer;
   VideoPlaybackStatus? _holdStatus;
+  bool _playRequested = false;
+
+  bool get playRequested => _playRequested;
 
   @override
   void dispose() {
@@ -66,6 +69,13 @@ class VideoPlayerNotifier extends StateNotifier<VideoPlayerState> {
   }
 
   Future<void> pause() async {
+    _playRequested = false;
+    await _pause();
+  }
+
+  Future<void> pauseForReload() => _pause();
+
+  Future<void> _pause() async {
     if (_controller == null) {
       return;
     }
@@ -81,6 +91,7 @@ class VideoPlayerNotifier extends StateNotifier<VideoPlayerState> {
   }
 
   Future<void> play() async {
+    _playRequested = true;
     if (_controller == null) {
       return;
     }

@@ -9,7 +9,7 @@ permissions: {}
 jobs:
   parse_template:
     runs-on: ubuntu-latest
-    if: ${{ github.event.action != 'labeled' && github.event.pull_request.head.repo.fork == true }}
+    if: ${{ github.repository == 'immich-app/immich' && (github.event.action != 'labeled' && github.event.pull_request.head.repo.fork == true) }}
     permissions:
       contents: read
     outputs:
@@ -43,11 +43,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: parse_template
     if: >-
-      ${{
+      ${{ github.repository == 'immich-app/immich' && (
         needs.parse_template.outputs.uses_template == 'false'
         && github.event.pull_request.state != 'closed'
         && !contains(github.event.pull_request.labels.*.name, 'auto-closed:template')
-      }}
+      ) }}
     permissions:
       pull-requests: write
     steps:
@@ -82,7 +82,7 @@ jobs:
 
   close_llm:
     runs-on: ubuntu-latest
-    if: ${{ github.event.action == 'labeled' && github.event.label.name == 'auto-closed:llm' }}
+    if: ${{ github.repository == 'immich-app/immich' && (github.event.action == 'labeled' && github.event.label.name == 'auto-closed:llm') }}
     permissions:
       pull-requests: write
     steps:
@@ -111,7 +111,7 @@ jobs:
 
   close_translations:
     runs-on: ubuntu-latest
-    if: ${{ github.event.action == 'labeled' && github.event.label.name == 'auto-closed:translations' }}
+    if: ${{ github.repository == 'immich-app/immich' && (github.event.action == 'labeled' && github.event.label.name == 'auto-closed:translations') }}
     permissions:
       pull-requests: write
     steps:
@@ -142,11 +142,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: parse_template
     if: >-
-      ${{
+      ${{ github.repository == 'immich-app/immich' && (
         needs.parse_template.outputs.uses_template == 'true'
         && github.event.pull_request.state == 'closed'
         && contains(github.event.pull_request.labels.*.name, 'auto-closed:template')
-      }}
+      ) }}
     permissions:
       pull-requests: write
     steps:

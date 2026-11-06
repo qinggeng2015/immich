@@ -30,6 +30,7 @@ import {
   mapPersonUsers,
 } from 'src/dtos/person.dto.js';
 import {
+  AssetType,
   AssetVisibility,
   CacheControl,
   DatabaseLock,
@@ -389,6 +390,10 @@ export class PersonService extends BaseService {
     }
 
     const asset = await this.assetJobRepository.getForDetectFacesJob(id);
+    if (asset?.type === AssetType.Audio) {
+      return JobStatus.Skipped;
+    }
+
     const previewFile = asset?.previewFile;
     if (!asset || !previewFile) {
       return JobStatus.Failed;

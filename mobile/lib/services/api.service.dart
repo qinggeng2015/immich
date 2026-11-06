@@ -191,7 +191,10 @@ class ApiService {
   }
 
   static Map<String, String> getRequestHeaders() {
-    return SettingsRepository.instance.appConfig.network.customHeaders;
+    return {
+      ...SettingsRepository.instance.appConfig.network.customHeaders,
+      'X-Immich-Features': 'audio,audio-analysis,audio-summary',
+    };
   }
 
   ApiClient get apiClient => _apiClient;

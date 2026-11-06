@@ -755,6 +755,7 @@ export class AssetRepository {
       .with('asset', (qb) =>
         qb
           .selectFrom('asset')
+          .$if(!auth.audioSupported, (qb) => qb.where('asset.type', '!=', AssetType.Audio))
           .select(truncatedDate<Date>(options.orderBy).as('timeBucket'))
           .$if(!!options.isTrashed, (qb) => qb.where('asset.status', '!=', AssetStatus.Deleted))
           .where('asset.deletedAt', options.isTrashed ? 'is not' : 'is', null)
@@ -819,6 +820,7 @@ export class AssetRepository {
       .with('cte', (qb) =>
         qb
           .selectFrom('asset')
+          .$if(!auth.audioSupported, (qb) => qb.where('asset.type', '!=', AssetType.Audio))
           .innerJoin('asset_exif', 'asset.id', 'asset_exif.assetId')
           .select((eb) => [
             'asset.duration',
@@ -826,6 +828,7 @@ export class AssetRepository {
             'asset.visibility',
             sql`asset."isFavorite" and asset."ownerId" = ${auth.user.id}`.as('isFavorite'),
             sql`asset.type = 'IMAGE'`.as('isImage'),
+            sql`asset.type = 'AUDIO'`.as('isAudio'),
             sql`asset."deletedAt" is not null`.as('isTrashed'),
             'asset.livePhotoVideoId',
             sql`extract(epoch from (asset."localDateTime" AT TIME ZONE 'UTC' - asset."fileCreatedAt" at time zone 'UTC'))::real / 3600`.as(
@@ -942,6 +945,7 @@ export class AssetRepository {
             eb.fn.coalesce(eb.fn('array_agg', ['visibility']), sql.lit('{}')).as('visibility'),
             eb.fn.coalesce(eb.fn('array_agg', ['isFavorite']), sql.lit('{}')).as('isFavorite'),
             eb.fn.coalesce(eb.fn('array_agg', ['isImage']), sql.lit('{}')).as('isImage'),
+            eb.fn.coalesce(eb.fn('array_agg', ['isAudio']), sql.lit('{}')).as('isAudio'),
             // TODO: isTrashed is redundant as it will always be all true or false depending on the options
             eb.fn.coalesce(eb.fn('array_agg', ['isTrashed']), sql.lit('{}')).as('isTrashed'),
             eb.fn.coalesce(eb.fn('array_agg', ['livePhotoVideoId']), sql.lit('{}')).as('livePhotoVideoId'),
@@ -1209,7 +1213,7 @@ export class AssetRepository {
       .select(['asset.originalPath'])
       .select((eb) => withFilePath(eb, AssetFileType.EncodedVideo).as('encodedVideoPath'))
       .where('asset.id', '=', id)
-      .where('asset.type', '=', AssetType.Video)
+      .where('asset.type', 'in', [AssetType.Video, AssetType.Audio])
       .executeTakeFirst();
   }
 

@@ -48,6 +48,15 @@ class UploadRepository {
     return FileDownloader().reset(group: group);
   }
 
+  Future<bool> cancelBackgroundTasks(List<String> taskIds) async {
+    final downloader = FileDownloader();
+    if (!await downloader.cancelTasksWithIds(taskIds)) {
+      return false;
+    }
+    await downloader.database.deleteRecordsWithIds(taskIds);
+    return true;
+  }
+
   /// Get a list of tasks that are ENQUEUED or RUNNING
   Future<List<Task>> getActiveTasks(String group) {
     return FileDownloader().allTasks(group: group);

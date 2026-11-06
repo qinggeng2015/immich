@@ -39,7 +39,10 @@ class AssetPreloader {
     });
   }
 
-  ImageStream _resolveImage(BaseAsset asset, Size size, Size? thumbnailSize) {
+  ImageStream? _resolveImage(BaseAsset asset, Size size, Size? thumbnailSize) {
+    if (asset.isAudio) {
+      return null;
+    }
     return getFullImageProvider(asset, size: size, remoteThumbnailSize: thumbnailSize).resolve(ImageConfiguration.empty)
       ..addListener(_dummyListener);
   }

@@ -39,6 +39,8 @@ import {
   mdiTrashCanOutline,
   mdiTrayFull,
   mdiVideo,
+  mdiWaveform,
+  mdiMicrophoneMessage,
 } from '@mdi/js';
 import type { MessageFormatter } from 'svelte-i18n';
 import { goto } from '$app/navigation';
@@ -207,6 +209,21 @@ export const asQueueItem = ($t: MessageFormatter, queue: { name: QueueName }): Q
       icon: mdiOcr,
       title: $t('admin.machine_learning_ocr'),
       subtitle: $t('admin.ocr_job_description'),
+    },
+    [QueueName.AudioWaveform]: {
+      icon: mdiWaveform,
+      title: $t('admin.audio_waveform_job'),
+      subtitle: $t('admin.audio_waveform_job_description'),
+    },
+    [QueueName.SpeechToText]: {
+      icon: mdiMicrophoneMessage,
+      title: $t('admin.audio_transcription_job'),
+      subtitle: $t('admin.audio_transcription_job_description'),
+    },
+    [QueueName.AudioSummary]: {
+      icon: mdiMicrophoneMessage,
+      title: $t('admin.audio_summary_job'),
+      subtitle: $t('admin.audio_summary_job_description'),
     },
     [QueueName.VideoConversion]: {
       icon: mdiVideo,

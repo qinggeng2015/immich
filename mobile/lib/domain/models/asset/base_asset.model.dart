@@ -44,6 +44,10 @@ sealed class BaseAsset {
 
   bool get isImage => type == AssetType.image;
   bool get isVideo => type == AssetType.video;
+  bool get isAudio => type == AssetType.audio;
+
+  bool get hasDimensions => (width ?? 0) > 0 && (height ?? 0) > 0;
+  double get aspectRatio => isAudio || !hasDimensions ? 1 : width! / height!;
 
   bool get isMotionPhoto => playbackStyle == AssetPlaybackStyle.livePhoto;
   bool get isAnimatedImage => playbackStyle == AssetPlaybackStyle.imageAnimated;

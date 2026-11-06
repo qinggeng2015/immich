@@ -68,7 +68,7 @@
   let tagsPromise = $state<Promise<TagResponseDto[]>>();
   let tags = $state<TagResponseDto[]>();
 
-  let typeTitle = $derived(getSearchTypeTitle(searchManager.filter.queryType));
+  let typeTitle = $derived(getSearchTypeTitle(searchManager.queryType));
   let peopleTitle = $state<string>();
   let dateTitle = $derived(
     getSearchDateTitle(

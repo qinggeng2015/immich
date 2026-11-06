@@ -7,7 +7,7 @@ enum SortOrder {
   }
 }
 
-enum TextSearchType { context, filename, description, ocr }
+enum TextSearchType { context, filename, description, ocr, transcript }
 
 enum ActionSource { timeline, viewer }
 
@@ -25,7 +25,7 @@ enum SlideshowDirection { forward, backward, shuffle }
 
 enum PartnerDirection { sharedBy, sharedWith }
 
-enum DevicePermission { photos, videos, storage, mediaLocation }
+enum DevicePermission { photos, videos, storage, mediaLocation, audio }
 
 enum DevicePermissionStatus {
   denied,

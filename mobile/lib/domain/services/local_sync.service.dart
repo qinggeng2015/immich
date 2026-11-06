@@ -11,6 +11,7 @@ import 'package:immich_mobile/entities/store.entity.dart';
 import 'package:immich_mobile/extensions/platform_extensions.dart';
 import 'package:immich_mobile/infrastructure/repositories/local_album.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/trashed_local_asset.repository.dart';
+import 'package:immich_mobile/platform/native_directory_api.g.dart';
 import 'package:immich_mobile/platform/native_sync_api.g.dart';
 import 'package:immich_mobile/repositories/asset_media.repository.dart';
 import 'package:immich_mobile/repositories/permission.repository.dart';
@@ -19,6 +20,8 @@ import 'package:immich_mobile/utils/diff.dart';
 import 'package:logging/logging.dart';
 
 const String _kSyncCancelledCode = "SYNC_CANCELLED";
+
+enum LocalSyncResult { completed, cancelled, failed }
 
 class LocalSyncService {
   final LocalAlbumRepository _localAlbumRepository;
@@ -42,7 +45,7 @@ class LocalSyncService {
 
   bool get _isCancelled => _cancellation?.isCompleted ?? false;
 
-  Future<void> sync({bool full = false}) async {
+  Future<LocalSyncResult> sync({bool full = false}) async {
     final Stopwatch stopwatch = Stopwatch()..start();
     try {
       if (CurrentPlatform.isAndroid && Store.get(StoreKey.manageLocalMediaAndroid, false)) {
@@ -62,7 +65,7 @@ class LocalSyncService {
       final delta = await _nativeSyncApi.getMediaChanges();
       if (!delta.hasChanges) {
         _log.fine("No media changes detected. Skipping sync");
-        return;
+        return LocalSyncResult.completed;
       }
 
       _log.fine("Delta updated: ${delta.updates.length}");
@@ -84,7 +87,7 @@ class LocalSyncService {
         for (final album in dbAlbums) {
           if (_isCancelled) {
             _log.warning("Local sync cancelled. Stopped processing albums.");
-            return;
+            return LocalSyncResult.cancelled;
           }
           final deviceIds = await _nativeSyncApi.getAssetIdsForAlbum(album.id);
           await _localAlbumRepository.syncDeletes(album.id, deviceIds);
@@ -98,7 +101,7 @@ class LocalSyncService {
         for (final album in cloudAlbums) {
           if (_isCancelled) {
             _log.warning("Local sync cancelled. Stopped processing cloud albums.");
-            return;
+            return LocalSyncResult.cancelled;
           }
           final dbAlbum = dbAlbums.firstWhereOrNull((a) => a.id == album.id);
           if (dbAlbum == null) {
@@ -110,52 +113,82 @@ class LocalSyncService {
 
         await _resolveCloudIds(newAssets);
       }
+      await _localAlbumRepository.removeOrphanedDirectoryAssets();
       await _nativeSyncApi.checkpointSync();
+      return LocalSyncResult.completed;
     } on PlatformException catch (e, s) {
       if (e.code == _kSyncCancelledCode) {
         _log.warning("Local sync cancelled");
+        return LocalSyncResult.cancelled;
       } else {
         _log.severe("Error performing device sync", e, s);
+        return LocalSyncResult.failed;
       }
     } catch (e, s) {
       _log.severe("Error performing device sync", e, s);
+      return LocalSyncResult.failed;
     } finally {
       stopwatch.stop();
       _log.info("Device sync took - ${stopwatch.elapsedMilliseconds}ms");
     }
   }
 
-  Future<void> fullSync() async {
+  Future<LocalSyncResult> fullSync() async {
     try {
       final Stopwatch stopwatch = Stopwatch()..start();
 
       final deviceAlbums = await _nativeSyncApi.getAlbums();
       final dbAlbums = await _localAlbumRepository.getAll(sortBy: {SortLocalAlbumsBy.id});
+      final unavailableDirectories =
+          CurrentPlatform.isAndroid && deviceAlbums.any((album) => album.id.startsWith('saf-folder:'))
+          ? (await NativeDirectoryApi().getUnavailableDirectoryIds()).toSet()
+          : <String>{};
+      final hasLegacyAudioAlbum = CurrentPlatform.isAndroid && dbAlbums.any((album) => album.id == 'immich-audio');
 
       await diffSortedLists(
-        dbAlbums,
+        hasLegacyAudioAlbum ? dbAlbums.where((album) => album.id != 'immich-audio').toList() : dbAlbums,
         deviceAlbums.toLocalAlbums(),
         compare: (a, b) => a.id.compareTo(b.id),
-        both: updateAlbum,
+        both: (dbAlbum, deviceAlbum) => unavailableDirectories.contains(deviceAlbum.id)
+            ? false
+            : updateAlbum(
+                dbAlbum,
+                deviceAlbum,
+                strict: hasLegacyAudioAlbum || deviceAlbum.id.startsWith('saf-folder:'),
+              ),
         onlyFirst: removeAlbum,
-        onlySecond: addAlbum,
+        onlySecond: (album) => unavailableDirectories.contains(album.id)
+            ? _localAlbumRepository.upsert(album.copyWith(assetCount: 0))
+            : addAlbum(album, strict: hasLegacyAudioAlbum || album.id.startsWith('saf-folder:')),
       );
 
+      if (_isCancelled) {
+        return LocalSyncResult.cancelled;
+      }
+      if (hasLegacyAudioAlbum) {
+        await _localAlbumRepository.removeLegacyAudioAlbum();
+      }
+
+      await _localAlbumRepository.removeOrphanedDirectoryAssets();
       await _nativeSyncApi.checkpointSync();
       stopwatch.stop();
       _log.info("Full device sync took - ${stopwatch.elapsedMilliseconds}ms");
+      return LocalSyncResult.completed;
     } on PlatformException catch (e, s) {
       if (e.code == _kSyncCancelledCode) {
         _log.warning("Full device sync cancelled");
+        return LocalSyncResult.cancelled;
       } else {
         _log.severe("Error performing full device sync", e, s);
+        return LocalSyncResult.failed;
       }
     } catch (e, s) {
       _log.severe("Error performing full device sync", e, s);
+      return LocalSyncResult.failed;
     }
   }
 
-  Future<void> addAlbum(LocalAlbum album) async {
+  Future<void> addAlbum(LocalAlbum album, {bool strict = false}) async {
     if (_isCancelled) {
       return;
     }
@@ -171,6 +204,9 @@ class LocalSyncService {
       _log.fine("Successfully added device album ${album.name}");
     } catch (e, s) {
       _log.warning("Error while adding device album", e, s);
+      if (strict) {
+        rethrow;
+      }
     }
   }
 
@@ -185,12 +221,16 @@ class LocalSyncService {
   }
 
   // The deviceAlbum is ignored since we are going to refresh it anyways
-  FutureOr<bool> updateAlbum(LocalAlbum dbAlbum, LocalAlbum deviceAlbum) async {
+  FutureOr<bool> updateAlbum(LocalAlbum dbAlbum, LocalAlbum deviceAlbum, {bool strict = false}) async {
     if (_isCancelled) {
       return false;
     }
     try {
       _log.fine("Syncing device album ${dbAlbum.name}");
+
+      if (deviceAlbum.id.startsWith('audio-folder:') || deviceAlbum.id.startsWith('saf-folder:')) {
+        return await fullDiff(dbAlbum, deviceAlbum, strict: strict);
+      }
 
       if (_albumsEqual(deviceAlbum, dbAlbum)) {
         _log.fine("Device album ${dbAlbum.name} has not changed. Skipping sync.");
@@ -206,9 +246,12 @@ class LocalSyncService {
       }
 
       // Slower path - full sync
-      return await fullDiff(dbAlbum, deviceAlbum);
+      return await fullDiff(dbAlbum, deviceAlbum, strict: strict);
     } catch (e, s) {
       _log.warning("Error while diff device album", e, s);
+      if (strict) {
+        rethrow;
+      }
     }
     return true;
   }
@@ -260,7 +303,7 @@ class LocalSyncService {
   @visibleForTesting
   // The [deviceAlbum] is expected to be refreshed before calling this method
   // with modified time and asset count
-  Future<bool> fullDiff(LocalAlbum dbAlbum, LocalAlbum deviceAlbum) async {
+  Future<bool> fullDiff(LocalAlbum dbAlbum, LocalAlbum deviceAlbum, {bool strict = false}) async {
     try {
       final assetsInDevice = deviceAlbum.assetCount > 0
           ? await _nativeSyncApi.getAssetsForAlbum(deviceAlbum.id).then((a) => a.toLocalAssets())
@@ -324,6 +367,9 @@ class LocalSyncService {
       return true;
     } catch (e, s) {
       _log.warning("Error on full syncing local album: ${dbAlbum.name}", e, s);
+      if (strict) {
+        rethrow;
+      }
     }
     return true;
   }

@@ -10,6 +10,12 @@ const withEffectiveFlags = (dto: UserConfigDto) => {
     machineLearning.clip.enabled = false;
     machineLearning.facialRecognition.enabled = false;
     machineLearning.ocr.enabled = false;
+    if (machineLearning.speechToText) {
+      machineLearning.speechToText.enabled = false;
+    }
+    if (machineLearning.audioSummary) {
+      machineLearning.audioSummary.enabled = false;
+    }
   }
 
   if (!machineLearning.clip.enabled) {

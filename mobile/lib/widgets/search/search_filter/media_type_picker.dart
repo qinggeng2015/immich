@@ -4,10 +4,11 @@ import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 
 class MediaTypePicker extends HookWidget {
-  const MediaTypePicker({super.key, required this.onSelect, this.filter});
+  const MediaTypePicker({super.key, required this.onSelect, this.filter, this.audioSupported = false});
 
   final Function(AssetType) onSelect;
   final AssetType? filter;
+  final bool audioSupported;
 
   @override
   Widget build(BuildContext context) {
@@ -24,6 +25,8 @@ class MediaTypePicker extends HookWidget {
           RadioListTile(key: const Key("all"), title: Text(context.t.all), value: AssetType.other),
           RadioListTile(key: const Key("image"), title: Text(context.t.image), value: AssetType.image),
           RadioListTile(key: const Key("video"), title: Text(context.t.video), value: AssetType.video),
+          if (audioSupported)
+            RadioListTile(key: const Key("audio"), title: Text(context.t.audio), value: AssetType.audio),
         ],
       ),
     );

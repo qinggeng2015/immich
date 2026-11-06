@@ -20,6 +20,7 @@ import { MaintenanceWebsocketRepository } from 'src/maintenance/maintenance-webs
 import { MaintenanceWorkerController } from 'src/maintenance/maintenance-worker.controller.js';
 import { MaintenanceWorkerService } from 'src/maintenance/maintenance-worker.service.js';
 import { AuthGuard, Authenticated } from 'src/middleware/auth.guard.js';
+import { ClientFeaturesInterceptor } from 'src/middleware/client-features.interceptor.js';
 import { ErrorInterceptor } from 'src/middleware/error.interceptor.js';
 import { FileUploadInterceptor } from 'src/middleware/file-upload.interceptor.js';
 import { GlobalExceptionFilter } from 'src/middleware/global-exception.filter.js';
@@ -50,6 +51,7 @@ const common = [...repositories, ...services, GlobalExceptionFilter];
 const commonMiddleware = [
   { provide: APP_FILTER, useClass: GlobalExceptionFilter },
   { provide: APP_PIPE, useClass: ZodValidationPipe },
+  { provide: APP_INTERCEPTOR, useClass: ClientFeaturesInterceptor },
   { provide: APP_INTERCEPTOR, useClass: ZodSerializerInterceptor },
   { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
   { provide: APP_INTERCEPTOR, useClass: ErrorInterceptor },

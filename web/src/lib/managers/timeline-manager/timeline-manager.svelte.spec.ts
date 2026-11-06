@@ -26,6 +26,7 @@ const toResponseDto = (...timelineAsset: TimelineAsset[]) => {
     visibility: [],
     isFavorite: [],
     isImage: [],
+    isAudio: [],
     isTrashed: [],
     livePhotoVideoId: [],
     fileCreatedAt: [],
@@ -46,6 +47,7 @@ const toResponseDto = (...timelineAsset: TimelineAsset[]) => {
     bucketAssets.visibility.push(asset.visibility);
     bucketAssets.isFavorite.push(asset.isFavorite);
     bucketAssets.isImage.push(asset.isImage);
+    bucketAssets.isAudio?.push(asset.isAudio ?? false);
     bucketAssets.isTrashed.push(asset.isTrashed);
     bucketAssets.livePhotoVideoId.push(asset.livePhotoVideoId!);
     bucketAssets.fileCreatedAt.push(fileCreatedAt);
@@ -69,6 +71,39 @@ function deriveLocalDateTimeFromFileCreatedAt(arg: TimelineAsset): TimelineAsset
 describe('TimelineManager', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+  });
+
+  it.each([true, false])('loads timeline media types with audio support %s', async (supportsAudio) => {
+    const timelineManager = new TimelineManager();
+    const assets = [
+      factory.timelineAsset({ isImage: true, isVideo: false, isAudio: false }),
+      factory.timelineAsset({ isImage: false, isVideo: true, isAudio: false }),
+      ...(supportsAudio ? [factory.timelineAsset({ isImage: false, isVideo: false, isAudio: true })] : []),
+    ].map((asset) => ({
+      ...asset,
+      fileCreatedAt: fromISODateTimeUTCToObject('2024-03-01T00:00:00.000Z'),
+    }));
+    const response = toResponseDto(...assets);
+    response.localOffsetHours = assets.map(() => 0);
+    response.createdAt = assets.map(() => '2024-03-01T00:00:00.000Z');
+    if (!supportsAudio) {
+      delete response.isAudio;
+    }
+    sdkMock.getTimeBuckets.mockResolvedValue([{ count: assets.length, timeBucket: '2024-03-01' }]);
+    sdkMock.getTimeBucket.mockResolvedValue(response);
+
+    await timelineManager.updateViewport({ width: 1588, height: 1000 });
+    await tick();
+
+    const loaded = await getAssets(timelineManager);
+    expect(loaded).toHaveLength(assets.length);
+    for (const asset of assets) {
+      expect(loaded.find(({ id }) => id === asset.id)).toMatchObject({
+        isImage: asset.isImage,
+        isVideo: asset.isVideo,
+        isAudio: asset.isAudio,
+      });
+    }
   });
 
   describe('init', () => {

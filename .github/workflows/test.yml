@@ -10,6 +10,7 @@ concurrency:
 permissions: {}
 jobs:
   pre-job:
+    if: ${{ github.repository == 'immich-app/immich' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -78,7 +79,7 @@ jobs:
   native-tests:
     name: Test & Lint Native Core
     needs: pre-job
-    if: ${{ fromJSON(needs.pre-job.outputs.should_run).native == true }}
+    if: ${{ github.repository == 'immich-app/immich' && (fromJSON(needs.pre-job.outputs.should_run).native == true) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -143,7 +144,7 @@ jobs:
   script-unit-tests:
     name: Scripts unit tests
     needs: pre-job
-    if: ${{ fromJSON(needs.pre-job.outputs.should_run).scripts == true }}
+    if: ${{ github.repository == 'immich-app/immich' && (fromJSON(needs.pre-job.outputs.should_run).scripts == true) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -172,7 +173,7 @@ jobs:
   server-unit-tests:
     name: Test & Lint Server
     needs: pre-job
-    if: ${{ fromJSON(needs.pre-job.outputs.should_run).server == true }}
+    if: ${{ github.repository == 'immich-app/immich' && (fromJSON(needs.pre-job.outputs.should_run).server == true) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -201,7 +202,7 @@ jobs:
   cli-unit-tests:
     name: Unit Test CLI
     needs: pre-job
-    if: ${{ fromJSON(needs.pre-job.outputs.should_run).cli == true }}
+    if: ${{ github.repository == 'immich-app/immich' && (fromJSON(needs.pre-job.outputs.should_run).cli == true) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -233,7 +234,7 @@ jobs:
   cli-unit-tests-win:
     name: Unit Test CLI (Windows)
     needs: pre-job
-    if: ${{ fromJSON(needs.pre-job.outputs.should_run).cli == true }}
+    if: ${{ github.repository == 'immich-app/immich' && (fromJSON(needs.pre-job.outputs.should_run).cli == true) }}
     runs-on: windows-latest
     permissions:
       contents: read
@@ -278,7 +279,7 @@ jobs:
   web-lint:
     name: Lint Web
     needs: pre-job
-    if: ${{ fromJSON(needs.pre-job.outputs.should_run).web == true }}
+    if: ${{ github.repository == 'immich-app/immich' && (fromJSON(needs.pre-job.outputs.should_run).web == true) }}
     runs-on: mich
     permissions:
       contents: read
@@ -317,7 +318,7 @@ jobs:
   web-unit-tests:
     name: Test Web
     needs: pre-job
-    if: ${{ fromJSON(needs.pre-job.outputs.should_run).web == true }}
+    if: ${{ github.repository == 'immich-app/immich' && (fromJSON(needs.pre-job.outputs.should_run).web == true) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -349,7 +350,7 @@ jobs:
   web-medium-tests:
     name: Test Web (Medium)
     needs: pre-job
-    if: ${{ fromJSON(needs.pre-job.outputs.should_run).web == true }}
+    if: ${{ github.repository == 'immich-app/immich' && (fromJSON(needs.pre-job.outputs.should_run).web == true) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -390,7 +391,7 @@ jobs:
   i18n-tests:
     name: Test i18n
     needs: pre-job
-    if: ${{ fromJSON(needs.pre-job.outputs.should_run).i18n == true }}
+    if: ${{ github.repository == 'immich-app/immich' && (fromJSON(needs.pre-job.outputs.should_run).i18n == true) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -438,7 +439,7 @@ jobs:
   e2e-tests-lint:
     name: End-to-End Lint
     needs: pre-job
-    if: ${{ fromJSON(needs.pre-job.outputs.should_run).e2e == true }}
+    if: ${{ github.repository == 'immich-app/immich' && (fromJSON(needs.pre-job.outputs.should_run).e2e == true) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -471,7 +472,7 @@ jobs:
   server-medium-tests:
     name: Medium Tests (Server)
     needs: pre-job
-    if: ${{ fromJSON(needs.pre-job.outputs.should_run).server == true }}
+    if: ${{ github.repository == 'immich-app/immich' && (fromJSON(needs.pre-job.outputs.should_run).server == true) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -514,7 +515,7 @@ jobs:
   e2e-tests-server-cli:
     name: End-to-End Tests (Server & CLI)
     needs: pre-job
-    if: ${{ fromJSON(needs.pre-job.outputs.should_run).e2e == true || fromJSON(needs.pre-job.outputs.should_run).server == true || fromJSON(needs.pre-job.outputs.should_run).cli == true }}
+    if: ${{ github.repository == 'immich-app/immich' && (fromJSON(needs.pre-job.outputs.should_run).e2e == true || fromJSON(needs.pre-job.outputs.should_run).server == true || fromJSON(needs.pre-job.outputs.should_run).cli == true) }}
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -602,7 +603,7 @@ jobs:
   e2e-tests-web:
     name: End-to-End Tests (Web)
     needs: pre-job
-    if: ${{ fromJSON(needs.pre-job.outputs.should_run).e2e == true || fromJSON(needs.pre-job.outputs.should_run).web == true }}
+    if: ${{ github.repository == 'immich-app/immich' && (fromJSON(needs.pre-job.outputs.should_run).e2e == true || fromJSON(needs.pre-job.outputs.should_run).web == true) }}
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -706,7 +707,7 @@ jobs:
     needs: [e2e-tests-server-cli, e2e-tests-web, e2e-tests-ml]
     permissions: {}
     runs-on: ubuntu-latest
-    if: always()
+    if: ${{ github.repository == 'immich-app/immich' && (always()) }}
     steps:
       - uses: immich-app/devtools/actions/success-check@81113db03f6d743efee81e0058c0b43f6cd6f36d # success-check-action-v0.0.6
         with:
@@ -714,7 +715,7 @@ jobs:
   mobile-unit-tests:
     name: Unit Test Mobile
     needs: pre-job
-    if: ${{ fromJSON(needs.pre-job.outputs.should_run).mobile == true }}
+    if: ${{ github.repository == 'immich-app/immich' && (fromJSON(needs.pre-job.outputs.should_run).mobile == true) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -776,7 +777,7 @@ jobs:
   ml-unit-tests:
     name: Unit Test ML
     needs: pre-job
-    if: ${{ fromJSON(needs.pre-job.outputs.should_run).machine-learning == true }}
+    if: ${{ github.repository == 'immich-app/immich' && (fromJSON(needs.pre-job.outputs.should_run).machine-learning == true) }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -806,7 +807,7 @@ jobs:
   e2e-tests-ml:
     name: End-to-End Tests (ML, ${{ matrix.runner }})
     needs: pre-job
-    if: ${{ fromJSON(needs.pre-job.outputs.should_run).machine-learning == true && !github.event.pull_request.head.repo.fork }}
+    if: ${{ github.repository == 'immich-app/immich' && (fromJSON(needs.pre-job.outputs.should_run).machine-learning == true && !github.event.pull_request.head.repo.fork) }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -895,7 +896,7 @@ jobs:
   github-files-formatting:
     name: .github Files Formatting
     needs: pre-job
-    if: ${{ fromJSON(needs.pre-job.outputs.should_run)['.github'] == true }}
+    if: ${{ github.repository == 'immich-app/immich' && (fromJSON(needs.pre-job.outputs.should_run)['.github'] == true) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -929,6 +930,7 @@ jobs:
         if: ${{ !cancelled() }}
 
   shellcheck:
+    if: ${{ github.repository == 'immich-app/immich' }}
     name: ShellCheck
     runs-on: ubuntu-latest
     permissions:
@@ -951,6 +953,7 @@ jobs:
           ignore_paths: >-
             **/open-api/** **/openapi** **/node_modules/**
   generated-api-up-to-date:
+    if: ${{ github.repository == 'immich-app/immich' }}
     name: OpenAPI Clients
     runs-on: ubuntu-latest
     permissions:
@@ -998,6 +1001,7 @@ jobs:
           exit 1
 
   sql-schema-up-to-date:
+    if: ${{ github.repository == 'immich-app/immich' }}
     name: SQL Schema Checks
     runs-on: ubuntu-latest
     permissions:

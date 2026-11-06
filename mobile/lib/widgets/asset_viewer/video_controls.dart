@@ -13,10 +13,11 @@ import 'package:immich_mobile/widgets/asset_viewer/animated_play_pause.dart';
 
 class VideoControls extends ConsumerStatefulWidget {
   final String videoPlayerName;
+  final Widget? seekControl;
 
   static const List<Shadow> _controlShadows = [Shadow(color: Colors.black87, blurRadius: 6, offset: Offset(0, 1))];
 
-  const VideoControls({super.key, required this.videoPlayerName});
+  const VideoControls({super.key, required this.videoPlayerName, this.seekControl});
 
   @override
   ConsumerState<VideoControls> createState() => _VideoControlsState();
@@ -50,6 +51,9 @@ class _VideoControlsState extends ConsumerState<VideoControls> {
 
   void _onHideTimer() {
     if (!mounted) {
+      return;
+    }
+    if (ref.read(assetViewerProvider).currentAsset?.isAudio == true) {
       return;
     }
     if (ref.read(_provider).status == VideoPlaybackStatus.playing) {
@@ -137,18 +141,19 @@ class _VideoControlsState extends ConsumerState<VideoControls> {
               const SizedBox(width: 12),
             ],
           ),
-          Slider(
-            value: min(position.inMicroseconds.toDouble(), duration.inMicroseconds.toDouble()),
-            min: 0,
-            max: max(duration.inMicroseconds.toDouble(), 1),
-            thumbColor: Colors.white,
-            activeColor: Colors.white,
-            inactiveColor: whiteOpacity75,
-            padding: EdgeInsets.zero,
-            onChangeStart: (_) => notifier.hold(),
-            onChangeEnd: (_) => notifier.release(),
-            onChanged: isLoaded ? (value) => _onSeek(isCasting, value) : null,
-          ),
+          widget.seekControl ??
+              Slider(
+                value: min(position.inMicroseconds.toDouble(), duration.inMicroseconds.toDouble()),
+                min: 0,
+                max: max(duration.inMicroseconds.toDouble(), 1),
+                thumbColor: Colors.white,
+                activeColor: Colors.white,
+                inactiveColor: whiteOpacity75,
+                padding: EdgeInsets.zero,
+                onChangeStart: (_) => notifier.hold(),
+                onChangeEnd: (_) => notifier.release(),
+                onChanged: isLoaded ? (value) => _onSeek(isCasting, value) : null,
+              ),
         ],
       ),
     );

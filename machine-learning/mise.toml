@@ -5,6 +5,12 @@ uv = "0.8.15"
 [tasks.install]
 run = "uv sync --locked"
 
+[tasks.lock]
+run = "uv lock"
+
+[tasks."test:speech-model"]
+run = "uv run python scripts/speech_smoke.py"
+
 [tasks.lint]
 run = "uv run ruff check immich_ml scripts test_main.py conftest.py"
 
